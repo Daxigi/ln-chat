@@ -81,17 +81,17 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
-# Endpoints de Estado
+
 @app.get("/health")
 async def health_check():
     """Verificar estado del sistema"""
     mysql_status = test_connection()
-    vanna_status = vanna_service.is_connected()
-    
+    vanna_status = vanna_service.connected # 
+
     return {
         "status": "ok",
         "mysql_connected": mysql_status,
-        "mindsdb_connected": vanna_status,  # Mantengo el nombre para compatibilidad con frontend
+        "mindsdb_connected": vanna_status,
         "vanna_connected": vanna_status,
         "timestamp": datetime.now().isoformat()
     }
