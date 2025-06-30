@@ -6,7 +6,13 @@ from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import os
+import logging
+import pymysql
 from dotenv import load_dotenv
+
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Importar servicios locales
 from auth import authenticate_user, create_access_token, get_current_user, get_password_hash
@@ -22,6 +28,14 @@ app = FastAPI(
     description="Backend con Vanna.ai para consultas SQL naturales",
     version="1.0.0"
 )
+
+# Event handlers
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Limpia recursos al cerrar la aplicación"""
+    from database import cleanup
+    cleanup()
+    logging.info("Aplicación cerrada correctamente")
 
 # CORS
 app.add_middleware(
@@ -42,6 +56,7 @@ class QueryRequest(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 
 class TrainingRequest(BaseModel):
     training_type: str  # 'ddl', 'documentation', 'sql'
@@ -82,22 +97,24 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     
     return {"access_token": access_token, "token_type": "bearer"}
 # Endpoints de Estado
+# En backend/main.py
+
 @app.get("/health")
 async def health_check():
     """Verificar estado del sistema"""
     mysql_status = test_connection()
-    vanna_status = vanna_service.is_connected()
-    
+    vanna_status = vanna_service.connected 
+
     return {
         "status": "ok",
         "mysql_connected": mysql_status,
-        "mindsdb_connected": vanna_status,  # Mantengo el nombre para compatibilidad con frontend
+        "mindsdb_connected": vanna_status,
         "vanna_connected": vanna_status,
         "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/vanna/training-data", summary="Obtener todos los datos de entrenamiento de Vanna")
-async def get_training_data(current_user: dict = Depends(get_current_user)):
+async def get_all_training_data(current_user: dict = Depends(get_current_user)):
     """
     Devuelve una lista de todos los fragmentos de conocimiento (DDL, docs, SQL)
     con los que Vanna ha sido entrenado.
@@ -112,31 +129,44 @@ async def get_training_data(current_user: dict = Depends(get_current_user)):
 # Endpoints de MySQL
 @app.get("/mysql/tables")
 async def get_tables(current_user: dict = Depends(get_current_user)):
-    """Obtener lista de tablas"""
+    """Obtener lista de tablas con manejo de conexiones mejorado"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SHOW TABLES")
-        tables = [table[0] for table in cursor.fetchall()]
-        cursor.close()
-        conn.close()
+        # Importar el context manager
+        from database import get_db_cursor
+        
+        with get_db_cursor() as cursor:
+            cursor.execute("SHOW TABLES")
+            tables = [table[f'Tables_in_{os.getenv("MYSQL_DATABASE", "digitalform")}'] for table in cursor.fetchall()]
+        
         return {"tables": tables}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f"Error en /mysql/tables: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo tablas: {str(e)}")
 
 @app.get("/mysql/table/{table_name}")
 async def get_table_structure(table_name: str, current_user: dict = Depends(get_current_user)):
-    """Obtener estructura de una tabla"""
+    """Obtener estructura de una tabla con manejo de conexiones mejorado"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(f"DESCRIBE {table_name}")
-        structure = cursor.fetchall()
-        cursor.close()
-        conn.close()
+        from database import get_db_cursor
+        
+        # Validar nombre de tabla para evitar SQL injection
+        if not table_name.replace("_", "").isalnum():
+            raise HTTPException(status_code=400, detail="Nombre de tabla inválido")
+        
+        with get_db_cursor(dict_cursor=False) as cursor:
+            cursor.execute(f"DESCRIBE `{table_name}`")
+            structure = cursor.fetchall()
+        
         return {"data": structure}
-    except Exception as e:
+    except pymysql.ProgrammingError as e:
+        if "doesn't exist" in str(e):
+            raise HTTPException(status_code=404, detail=f"La tabla '{table_name}' no existe")
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        import logging
+        logging.error(f"Error en /mysql/table/{table_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estructura: {str(e)}")
 
 @app.post("/vanna/debug-prompt", summary="[DEBUG] Ver el prompt enviado a OpenAI")
 async def debug_vanna_prompt(request: QueryRequest, current_user: dict = Depends(get_current_user)):
@@ -153,7 +183,7 @@ async def debug_vanna_prompt(request: QueryRequest, current_user: dict = Depends
 
 @app.post("/mysql/query")
 async def execute_query(request: QueryRequest, current_user: dict = Depends(get_current_user)):
-    """Ejecutar query SQL directamente"""
+    """Ejecutar query SQL directamente con manejo de conexiones mejorado"""
     try:
         # Validación básica de seguridad
         query_upper = request.query.upper()
@@ -161,19 +191,28 @@ async def execute_query(request: QueryRequest, current_user: dict = Depends(get_
         if any(keyword in query_upper for keyword in dangerous_keywords):
             raise HTTPException(status_code=400, detail="Operación no permitida")
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(request.query)
-        results = cursor.fetchall()
-        cursor.close()
-        conn.close()
+        from database import get_db_cursor
+        
+        with get_db_cursor() as cursor:
+            cursor.execute(request.query)
+            results = cursor.fetchall()
         
         return {
             "success": True,
             "data": results,
             "query": request.query
         }
+    except pymysql.Error as e:
+        import logging
+        logging.error(f"Error MySQL en /mysql/query: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error de base de datos: {str(e)}",
+            "query": request.query
+        }
     except Exception as e:
+        import logging
+        logging.error(f"Error general en /mysql/query: {str(e)}")
         return {
             "success": False,
             "error": str(e),
@@ -183,10 +222,13 @@ async def execute_query(request: QueryRequest, current_user: dict = Depends(get_
 # Endpoints de Vanna/MindsDB (mantengo el nombre para compatibilidad)
 @app.post("/mindsdb/chat")
 async def chat_with_vanna(request: ChatRequest, current_user: dict = Depends(get_current_user)):
-    """Hacer preguntas en lenguaje natural"""
+    """Hacer preguntas en lenguaje natural con memoria conversacional"""
     try:
-        # Generar SQL desde pregunta natural
-        sql = vanna_service.generate_sql(request.query)
+        # Obtener historial de conversación del request
+        conversation_history = request.conversation_history or []
+        
+        # Generar SQL con contexto conversacional
+        sql = vanna_service.generate_sql(request.query, conversation_history)
         
         if not sql:
             return {
@@ -195,16 +237,26 @@ async def chat_with_vanna(request: ChatRequest, current_user: dict = Depends(get
                 "sql": None
             }
         
-        # Ejecutar SQL
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        results = cursor.fetchall()
-        cursor.close()
-        conn.close()
+        # Ejecutar SQL con manejo de conexiones mejorado
+        from database import get_db_cursor
         
-        # Generar respuesta natural - siempre usar el método mejorado
-        answer = vanna_service.generate_summary(request.query, sql, results)
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute(sql)
+                results = cursor.fetchall()
+        except Exception as db_error:
+            import logging
+            logging.error(f"Error ejecutando SQL generado: {sql}")
+            logging.error(f"Error: {str(db_error)}")
+            return {
+                "success": False,
+                "answer": f"Generé la consulta SQL pero hubo un error al ejecutarla: {str(db_error)}",
+                "sql": sql,
+                "error": str(db_error)
+            }
+        
+        # Generar respuesta natural con contexto conversacional
+        answer = vanna_service.generate_summary(request.query, sql, results, conversation_history)
         
         # Si no hay resumen generado (por error), crear fallback mejorado
         if not answer:
@@ -236,6 +288,8 @@ async def chat_with_vanna(request: ChatRequest, current_user: dict = Depends(get
         }
         
     except Exception as e:
+        import logging
+        logging.error(f"Error general en /mindsdb/chat: {str(e)}")
         return {
             "success": False,
             "answer": f"Ocurrió un error al procesar tu pregunta: {str(e)}",

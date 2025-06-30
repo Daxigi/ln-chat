@@ -155,35 +155,67 @@ class LocalVannaService:
             logger.error(f"Error obteniendo contexto: {e}")
             return ""
     
-    def generate_sql(self, question: str) -> Optional[str]:
-        """Genera SQL usando OpenAI con contexto local y reglas estrictas."""
+    def generate_sql(self, question: str, conversation_history: List[Dict[str, str]] = None) -> Optional[str]:
+        """Genera SQL usando OpenAI con contexto local, reglas estrictas y memoria conversacional."""
         try:
-            # Obtener contexto relevante
-            context = self.get_relevant_context(question)
+            # Detectar si es una pregunta contextual
+            is_contextual = self.is_contextual_question(question)
             
-            # --- INICIO DE CAMBIOS EN EL PROMPT ---
+            # Si es contextual y no hay historial, advertir
+            if is_contextual and (not conversation_history or len(conversation_history) == 0):
+                logger.warning("Pregunta contextual detectada sin historial de conversación")
             
-            # Construimos un prompt mucho más directivo
-            system_prompt = """You are a world-class SQL generation expert for MySQL. Your task is to generate a single, valid MySQL query based on a user's question and the provided context.
+            # Obtener contexto relevante de la base de datos
+            db_context = self.get_relevant_context(question)
+            
+            # Construir contexto conversacional si existe historial
+            conversation_context = ""
+            if conversation_history and len(conversation_history) > 0:
+                conversation_context = "\n\nPREVIOUS CONVERSATION CONTEXT:\n"
+                # Si es contextual, incluir más historial
+                history_limit = 7 if is_contextual else 5
+                for i, interaction in enumerate(conversation_history[-history_limit:]):
+                    conversation_context += f"\nInteraction {i+1}:\n"
+                    conversation_context += f"User asked: {interaction.get('question', '')}\n"
+                    conversation_context += f"SQL generated: {interaction.get('sql', '')}\n"
+                    if interaction.get('answer'):
+                        # Incluir un resumen de la respuesta si es muy larga
+                        answer = interaction['answer']
+                        if len(answer) > 200:
+                            answer = answer[:200] + "..."
+                        conversation_context += f"Answer summary: {answer}\n"
+            
+            # Prompt mejorado con soporte para contexto conversacional
+            system_prompt = """You are a world-class SQL generation expert for MySQL with conversational memory. Your task is to generate a single, valid MySQL query based on a user's question, database context, and conversation history.
 
 Follow these rules STRICTLY:
-1.  **Analyze the context first.** The context contains table schemas (DDL), documentation, and query examples. This is your ONLY source of truth.
-2.  **You MUST use the table and column names EXACTLY as provided in the context.** Do NOT invent or assume table or column names. If a column for 'last connection' is named 'ultima_conexion' in the context, you must use 'ultima_conexion'.
-3.  **Prioritize Documentation and DDL.** The 'Documentation' and 'Table Schema' sections are the most reliable sources for column names and their meanings.
-4.  **Do not add any explanation, comments, or markdown.** Your output must be ONLY the SQL query.
+1. **Analyze the context first.** The context contains table schemas (DDL), documentation, and query examples. This is your ONLY source of truth for table/column names.
+2. **Consider conversation history.** If the user refers to previous queries or results (e.g., "and how many were men?" after asking about women), use the previous SQL as reference.
+3. **You MUST use the table and column names EXACTLY as provided in the context.** Do NOT invent or assume table or column names.
+4. **Handle contextual references intelligently.** If the user says "the same but for X", modify the previous query appropriately.
+5. **Do not add any explanation, comments, or markdown.** Your output must be ONLY the SQL query.
+
+Examples of contextual queries:
+- Previous: "how many female users?" → Current: "and males?" → Modify the previous query changing the gender condition
+- Previous: "users created in 2024" → Current: "show me the first 10" → Add LIMIT to previous query
+- Previous: "count of forms" → Current: "which are the most used?" → Change from COUNT to listing with ORDER BY
 """
             
-            user_prompt = f"""CONTEXT:
-{context}
+            # Agregar indicación especial si es contextual
+            if is_contextual and conversation_history:
+                system_prompt += "\n\nIMPORTANT: The current question appears to be contextual. Pay special attention to the previous queries and modify them accordingly."
+            
+            user_prompt = f"""DATABASE CONTEXT:
+{db_context}
+{conversation_context}
 
-USER QUESTION:
+CURRENT USER QUESTION:
 {question}
 
 SQL QUERY:
 """
-            # --- FIN DE CAMBIOS EN EL PROMPT ---
 
-            # Llamar a OpenAI con el nuevo sistema de prompts
+            # Llamar a OpenAI con el contexto completo
             response = openai.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -199,15 +231,16 @@ SQL QUERY:
             # Limpiar el SQL
             sql = sql.replace("```sql", "").replace("```", "").strip()
             
-            logger.info(f"SQL generado: {sql}")
+            logger.info(f"SQL generado {'con contexto' if is_contextual else ''}: {sql}")
             return sql
             
         except Exception as e:
             logger.error(f"Error generando SQL: {e}")
             return None
 
-    def generate_summary(self, question: str, sql: str, results: List[Dict[str, Any]]) -> Optional[str]:
-        """Genera un resumen en lenguaje natural a partir de los resultados de la consulta."""
+    def generate_summary(self, question: str, sql: str, results: List[Dict[str, Any]], 
+                        conversation_history: List[Dict[str, str]] = None) -> Optional[str]:
+        """Genera un resumen en lenguaje natural con contexto conversacional."""
         try:
             # Límite de resultados a enviar a la IA para evitar sobrecarga.
             SUMMARY_RESULT_LIMIT = 50
@@ -219,67 +252,77 @@ SQL QUERY:
             results_to_send = results[:SUMMARY_RESULT_LIMIT]
             
             # Convertir resultados a formato más legible
-            # Si es una lista de tuplas (resultado directo de MySQL), convertir a lista de dicts
             if results_to_send and isinstance(results_to_send[0], tuple):
-                # Intentar obtener los nombres de columnas del SQL
                 import re
                 select_match = re.search(r'SELECT\s+(.*?)\s+FROM', sql, re.IGNORECASE)
                 if select_match and 'COUNT' in sql.upper():
-                    # Para consultas COUNT, asignar nombre genérico
                     results_to_send = [{"count": row[0]} for row in results_to_send]
                 else:
-                    # Para otras consultas, usar índices genéricos
                     results_to_send = [{"resultado": row[0] if len(row) == 1 else row} for row in results_to_send]
             
             results_str = str(results_to_send)
 
-            # Construimos el prompt para la IA con instrucciones más específicas
+            # Construir contexto conversacional
+            conversation_context = ""
+            if conversation_history and len(conversation_history) > 0:
+                conversation_context = "\n\nContexto de conversación previa:"
+                # Solo incluir las últimas 3 interacciones para el resumen
+                for interaction in conversation_history[-3:]:
+                    if interaction.get('question') and interaction.get('answer'):
+                        conversation_context += f"\n- Preguntaste: {interaction['question']}"
+                        # Resumir respuestas largas
+                        answer = interaction['answer']
+                        if len(answer) > 150:
+                            answer = answer[:150] + "..."
+                        conversation_context += f"\n  Respondí: {answer}"
+
+            # Prompt mejorado con memoria conversacional
             prompt = f"""Eres un asistente amigable que ayuda a usuarios a entender datos de trámites digitales. 
 Tu tarea es explicar los resultados de una consulta de manera clara, natural y conversacional en español.
 
 Contexto:
-- Pregunta del usuario: "{question}"
+- Pregunta actual del usuario: "{question}"
 - Consulta SQL ejecutada: {sql}
 - Resultados obtenidos: {results_str}
+{conversation_context}
 
 Instrucciones específicas:
 1. Responde de forma natural y conversacional, como si estuvieras hablando con un amigo
-2. Si es un conteo o número único, no digas solo "El resultado es X". En su lugar, formula una respuesta completa y contextualizada
-3. Para consultas de conteo de usuarios, menciona específicamente qué tipo de usuarios (ej: "usuarios mujeres", "usuarios nuevos", etc.)
-4. Si hay fechas involucradas, menciónalas de forma natural
-5. Agrega contexto útil cuando sea apropiado (ej: "Durante el año 2024 se registraron...")
-6. Sé específico pero amigable
-7. Si el resultado es un número grande, puedes mencionarlo con formato más legible (ej: "2,977" en lugar de "2977")
+2. Si la pregunta hace referencia a algo anterior (ej: "¿y cuántos hombres?" después de preguntar por mujeres), haz la conexión explícita
+3. Si es relevante, compara con resultados anteriores (ej: "A diferencia de las 2,977 mujeres que mencioné antes, hay X hombres")
+4. Para consultas de conteo, sé específico sobre qué estás contando
+5. Si hay fechas involucradas, menciónalas de forma natural
+6. Usa números con formato legible (2,977 en lugar de 2977)
+7. Si detectas que es una pregunta de seguimiento, relaciónala con la respuesta anterior
 
-Genera una respuesta natural y completa:"""
+Genera una respuesta natural y contextualizada:"""
 
-            # Añadimos una nota si los resultados fueron truncados
+            # Añadir nota sobre resultados truncados
             if results_truncated:
                 prompt += f"\n\nNota: La consulta encontró {len(results)} resultados en total, pero estoy mostrando solo los primeros {SUMMARY_RESULT_LIMIT}."
 
-            # Llamada a la API de OpenAI para generar el resumen
+            # Llamada a OpenAI
             response = openai.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system", 
-                        "content": "Eres un asistente conversacional que explica datos de manera amigable y natural. Siempre respondes en español de forma clara y contextualizada."
+                        "content": "Eres un asistente conversacional con memoria que explica datos de manera amigable y natural. Siempre respondes en español de forma clara, contextualizada y recordando conversaciones previas cuando es relevante."
                     },
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=500,
-                temperature=0.3  # Un poco más de variabilidad para respuestas más naturales
+                temperature=0.3
             )
 
             summary = response.choices[0].message.content.strip()
-            logger.info(f"Resumen generado: {summary}")
+            logger.info(f"Resumen generado con contexto: {summary}")
             return summary
 
         except Exception as e:
             logger.error(f"Error generando resumen: {e}")
             # Fallback mejorado
             if results and len(results) == 1:
-                # Para resultados únicos, intentar dar una respuesta más natural
                 if isinstance(results[0], (tuple, list)) and len(results[0]) == 1:
                     value = results[0][0]
                     if 'count' in sql.lower():
@@ -292,9 +335,25 @@ Genera una respuesta natural y completa:"""
             
             return f"Se encontraron {len(results)} resultados para tu consulta."
 
-    def is_connected(self) -> bool:
-        """Verifica si el servicio está conectado y funcionando"""
-        return self.connected and self.connection is not None
+    def is_contextual_question(self, question: str) -> bool:
+        """Detecta si una pregunta hace referencia a contexto previo"""
+        contextual_patterns = [
+            "y cuánt", "y los", "y las", "y el", "y la",
+            "mismo", "misma", "igual", 
+            "pero", "sin embargo",
+            "también", "además",
+            "anterior", "previo",
+            "comparar", "diferencia",
+            "primero", "último",
+            "resto", "demás", "otros",
+            "ahora", "entonces",
+            "ese", "esa", "esos", "esas",
+            "dicho", "mencionado"
+        ]
+        
+        question_lower = question.lower()
+        return any(pattern in question_lower for pattern in contextual_patterns)
+    
 
     # También agrega estos métodos alias si no los tienes:
 
