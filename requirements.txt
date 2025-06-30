@@ -1,0 +1,32 @@
+# Core dependencies
+vanna[chromadb,mysql]==0.7.3
+openai>=1.0.0
+python-dotenv==1.0.0
+
+# Database
+pymysql==1.1.0
+sqlalchemy>=2.0.0
+
+# API Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Frontend
+streamlit==1.29.0
+plotly==5.18.0
+
+# Vector Database
+chromadb==0.4.22
+
+# Utilities
+pandas==2.1.4
+numpy==1.26.2
+colorama==0.4.6
+
+# Development
+pytest==7.4.3
+black==23.11.0
+flake8==6.1.0
