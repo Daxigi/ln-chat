@@ -1,458 +1,387 @@
-# backend/vanna_service_alt.py - Implementación alternativa 100% local
+# vanna_service.py - Implementación mínima de Vanna con ChromaDB y OpenAI
 import os
+import json
+import uuid
 import logging
-from dotenv import load_dotenv
+import pymysql
 import openai
 import chromadb
-import pymysql
 import pandas as pd
-from typing import Optional, List, Dict, Any
 from chromadb.utils import embedding_functions
+from dotenv import load_dotenv
+from typing import List, Dict, Optional
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 load_dotenv()
+logger = logging.getLogger(__name__)
 
-class LocalVannaService:
-    """Implementación local sin dependencia de servidores Vanna"""
+
+class VannaChromaDB:
+    """
+    Implementación mínima de Vanna usando ChromaDB como vector store y OpenAI.
+    Basado en la arquitectura oficial de Vanna.
+    """
     
-    def __init__(self):
-        self.client = None
-        self.collection = None
-        self.connection = None
-        self.connected = False
+    def __init__(self, config: Dict = None):
+        if config is None:
+            config = {}
+            
+        # Configuración del Vector Store (ChromaDB)
+        chroma_path = config.get("chroma_path", os.getenv("VANNA_VECTOR_DB_PATH", "./chroma_db"))
         
-        # Configurar OpenAI
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("VANNA_MODEL", "gpt-4o-mini")
-        
-        # Inicializar ChromaDB local
-        self.init_chromadb()
-        
-        # Conectar a MySQL
-        if self.connect_to_mysql():
-            self.connected = True
-            logger.info("✅ Servicio inicializado correctamente")
-    
-    def init_chromadb(self):
-        """Inicializa ChromaDB localmente usando embeddings de OpenAI."""
-        try:
-            chroma_path = os.getenv("VANNA_VECTOR_DB_PATH", "./chroma_db")
-            self.client = chromadb.PersistentClient(path=chroma_path)
-
-            # --- INICIO DE CAMBIOS ---
-
-            # 1. Crear la función de embedding de OpenAI
-            openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                model_name="text-embedding-3-small"  # Modelo recomendado: potente y económico
-            )
-
-            # 2. Asignar la función al crear la colección
-            self.collection = self.client.get_or_create_collection(
-                name="vanna_training_openai",  # Un nuevo nombre para evitar conflictos
-                metadata={"hnsw:space": "cosine"},
-                embedding_function=openai_ef  # ¡La clave está aquí!
-            )
-
-            # --- FIN DE CAMBIOS ---
-
-            logger.info(f"✅ ChromaDB inicializado en {chroma_path} con embeddings de OpenAI")
-        except Exception as e:
-            logger.error(f"Error inicializando ChromaDB: {e}")
-
-    def connect_to_mysql(self) -> bool:
-        """Conecta a MySQL"""
-        try:
-            self.connection = pymysql.connect(
-                host=os.getenv("MYSQL_HOST"),
-                user=os.getenv("MYSQL_USER"),
-                password=os.getenv("MYSQL_PASSWORD"),
-                database=os.getenv("MYSQL_DATABASE"),
-                port=int(os.getenv("MYSQL_PORT", 3306)),
-                cursorclass=pymysql.cursors.DictCursor
-            )
-            logger.info("✅ Conectado a MySQL")
-            return True
-        except Exception as e:
-            logger.error(f"Error conectando a MySQL: {e}")
-            return False
-    
-    def train(self, **kwargs) -> bool:
-        """Entrena el modelo con DDL, documentación o pares pregunta-SQL"""
-        try:
-            if not self.collection:
-                return False
-                
-            # Generar ID único
-            import uuid
-            doc_id = str(uuid.uuid4())
-            
-            if 'ddl' in kwargs:
-                # Entrenar con DDL
-                self.collection.add(
-                    documents=[kwargs['ddl']],
-                    metadatas=[{"type": "ddl"}],
-                    ids=[doc_id]
-                )
-                logger.info("✅ DDL agregado al entrenamiento")
-                
-            elif 'documentation' in kwargs:
-                # Entrenar con documentación
-                self.collection.add(
-                    documents=[kwargs['documentation']],
-                    metadatas=[{"type": "documentation"}],
-                    ids=[doc_id]
-                )
-                logger.info("✅ Documentación agregada")
-                
-            elif 'question' in kwargs and 'sql' in kwargs:
-                # Entrenar con par pregunta-SQL
-                combined = f"Question: {kwargs['question']}\nSQL: {kwargs['sql']}"
-                self.collection.add(
-                    documents=[combined],
-                    metadatas=[{
-                        "type": "question_sql",
-                        "question": kwargs['question'],
-                        "sql": kwargs['sql']
-                    }],
-                    ids=[doc_id]
-                )
-                logger.info("✅ Par pregunta-SQL agregado")
-                
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error en train: {e}")
-            return False
-    
-    def get_relevant_context(self, question: str, n_results: int = 5) -> str:
-        """Obtiene contexto relevante de ChromaDB"""
-        try:
-            if not self.collection:
-                return ""
-                
-            results = self.collection.query(
-                query_texts=[question],
-                n_results=n_results
-            )
-            
-            context_parts = []
-            
-            # Agregar documentos relevantes
-            for i, doc in enumerate(results['documents'][0]):
-                metadata = results['metadatas'][0][i]
-                if metadata['type'] == 'ddl':
-                    context_parts.append(f"Table Schema:\n{doc}")
-                elif metadata['type'] == 'documentation':
-                    context_parts.append(f"Documentation:\n{doc}")
-                elif metadata['type'] == 'question_sql':
-                    context_parts.append(f"Example:\n{doc}")
-            
-            return "\n\n".join(context_parts)
-            
-        except Exception as e:
-            logger.error(f"Error obteniendo contexto: {e}")
-            return ""
-    
-    def generate_sql(self, question: str) -> Optional[str]:
-        """Genera SQL usando OpenAI con contexto local y reglas estrictas."""
-        try:
-            # Obtener contexto relevante
-            context = self.get_relevant_context(question)
-            
-            # --- INICIO DE CAMBIOS EN EL PROMPT ---
-            
-            # Construimos un prompt mucho más directivo
-            system_prompt = """You are a world-class SQL generation expert for MySQL. Your task is to generate a single, valid MySQL query based on a user's question and the provided context.
-
-Follow these rules STRICTLY:
-1.  **Analyze the context first.** The context contains table schemas (DDL), documentation, and query examples. This is your ONLY source of truth.
-2.  **You MUST use the table and column names EXACTLY as provided in the context.** Do NOT invent or assume table or column names. If a column for 'last connection' is named 'ultima_conexion' in the context, you must use 'ultima_conexion'.
-3.  **Prioritize Documentation and DDL.** The 'Documentation' and 'Table Schema' sections are the most reliable sources for column names and their meanings.
-4.  **Do not add any explanation, comments, or markdown.** Your output must be ONLY the SQL query.
-"""
-            
-            user_prompt = f"""CONTEXT:
-{context}
-
-USER QUESTION:
-{question}
-
-SQL QUERY:
-"""
-            # --- FIN DE CAMBIOS EN EL PROMPT ---
-
-            # Llamar a OpenAI con el nuevo sistema de prompts
-            response = openai.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=250,
-                temperature=0
-            )
-            
-            sql = response.choices[0].message.content.strip()
-            
-            # Limpiar el SQL
-            sql = sql.replace("```sql", "").replace("```", "").strip()
-            
-            logger.info(f"SQL generado: {sql}")
-            return sql
-            
-        except Exception as e:
-            logger.error(f"Error generando SQL: {e}")
-            return None
-
-    def generate_summary(self, question: str, sql: str, results: List[Dict[str, Any]]) -> Optional[str]:
-        """Genera un resumen en lenguaje natural a partir de los resultados de la consulta."""
-        try:
-            # Límite de resultados a enviar a la IA para evitar sobrecarga.
-            SUMMARY_RESULT_LIMIT = 50
-            
-            if not results:
-                return "No se encontraron resultados para tu consulta. Parece que no hay datos que coincidan con lo que buscas."
-
-            results_truncated = len(results) > SUMMARY_RESULT_LIMIT
-            results_to_send = results[:SUMMARY_RESULT_LIMIT]
-            
-            # Convertir resultados a formato más legible
-            # Si es una lista de tuplas (resultado directo de MySQL), convertir a lista de dicts
-            if results_to_send and isinstance(results_to_send[0], tuple):
-                # Intentar obtener los nombres de columnas del SQL
-                import re
-                select_match = re.search(r'SELECT\s+(.*?)\s+FROM', sql, re.IGNORECASE)
-                if select_match and 'COUNT' in sql.upper():
-                    # Para consultas COUNT, asignar nombre genérico
-                    results_to_send = [{"count": row[0]} for row in results_to_send]
-                else:
-                    # Para otras consultas, usar índices genéricos
-                    results_to_send = [{"resultado": row[0] if len(row) == 1 else row} for row in results_to_send]
-            
-            results_str = str(results_to_send)
-
-            # Construimos el prompt para la IA con instrucciones más específicas
-            prompt = f"""Eres un asistente amigable que ayuda a usuarios a entender datos de trámites digitales. 
-Tu tarea es explicar los resultados de una consulta de manera clara, natural y conversacional en español.
-
-Contexto:
-- Pregunta del usuario: "{question}"
-- Consulta SQL ejecutada: {sql}
-- Resultados obtenidos: {results_str}
-
-Instrucciones específicas:
-1. Responde de forma natural y conversacional, como si estuvieras hablando con un amigo
-2. Si es un conteo o número único, no digas solo "El resultado es X". En su lugar, formula una respuesta completa y contextualizada
-3. Para consultas de conteo de usuarios, menciona específicamente qué tipo de usuarios (ej: "usuarios mujeres", "usuarios nuevos", etc.)
-4. Si hay fechas involucradas, menciónalas de forma natural
-5. Agrega contexto útil cuando sea apropiado (ej: "Durante el año 2024 se registraron...")
-6. Sé específico pero amigable
-7. Si el resultado es un número grande, puedes mencionarlo con formato más legible (ej: "2,977" en lugar de "2977")
-
-Genera una respuesta natural y completa:"""
-
-            # Añadimos una nota si los resultados fueron truncados
-            if results_truncated:
-                prompt += f"\n\nNota: La consulta encontró {len(results)} resultados en total, pero estoy mostrando solo los primeros {SUMMARY_RESULT_LIMIT}."
-
-            # Llamada a la API de OpenAI para generar el resumen
-            response = openai.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "Eres un asistente conversacional que explica datos de manera amigable y natural. Siempre respondes en español de forma clara y contextualizada."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.3  # Un poco más de variabilidad para respuestas más naturales
-            )
-
-            summary = response.choices[0].message.content.strip()
-            logger.info(f"Resumen generado: {summary}")
-            return summary
-
-        except Exception as e:
-            logger.error(f"Error generando resumen: {e}")
-            # Fallback mejorado
-            if results and len(results) == 1:
-                # Para resultados únicos, intentar dar una respuesta más natural
-                if isinstance(results[0], (tuple, list)) and len(results[0]) == 1:
-                    value = results[0][0]
-                    if 'count' in sql.lower():
-                        return f"Según los datos, hay {value} registros que cumplen con tu consulta."
-                    else:
-                        return f"El valor encontrado es: {value}"
-                elif isinstance(results[0], dict) and len(results[0]) == 1:
-                    value = list(results[0].values())[0]
-                    return f"Encontré que el resultado es: {value}"
-            
-            return f"Se encontraron {len(results)} resultados para tu consulta."
-
-    def is_connected(self) -> bool:
-        """Verifica si el servicio está conectado y funcionando"""
-        return self.connected and self.connection is not None
-
-    # También agrega estos métodos alias si no los tienes:
-
-    def train_ddl(self, ddl: str) -> bool:
-        """Entrena con DDL"""
-        return self.train(ddl=ddl)
-
-    def train_documentation(self, documentation: str) -> bool:
-        """Entrena con documentación"""
-        return self.train(documentation=documentation)
-
-    def train_sql(self, question: str, sql: str) -> bool:
-        """Entrena con par pregunta-SQL"""
-        return self.train(question=question, sql=sql)
-
-    def get_training_data(self) -> Dict[str, Any]:
-        """Obtiene información sobre los datos de entrenamiento"""
-        try:
-            if not self.collection:
-                return {
-                    "ddl_count": 0,
-                    "documentation_count": 0,
-                    "sql_count": 0,
-                    "total": 0
-                }
-            
-            return {
-                "ddl_count": 0,  # Puedes implementar conteo real si quieres
-                "documentation_count": 0,
-                "sql_count": 0,
-                "total": self.collection.count() if self.collection else 0
-            }
-        except:
-            return {
-                "ddl_count": 0,
-                "documentation_count": 0,
-                "sql_count": 0,
-                "total": 0
-            }
-
-    def get_all_training_data(self) -> List[Dict[str, Any]]:
-        """
-        Recupera todos los datos de entrenamiento almacenados en ChromaDB.
-        """
-        if not self.collection:
-            return []
-        
-        # El método .get() sin filtros devuelve todo
-        # Contamos cuántos items hay para recuperarlos todos
-        count = self.collection.count()
-        if count == 0:
-            return []
-            
-        data = self.collection.get(
-            limit=count,
-            include=["metadatas", "documents"]
+        # Embeddings de OpenAI
+        self.embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model_name="text-embedding-3-small"
         )
         
-        # Formateamos la salida para que sea más legible
-        formatted_data = []
-        for i, doc_id in enumerate(data['ids']):
-            formatted_data.append({
-                "id": doc_id,
-                "document": data['documents'][i],
-                "metadata": data['metadatas'][i]
-            })
-            
-        return formatted_data
-
-    def remove_training(self, training_id: str) -> bool:
-        """Elimina un dato de entrenamiento"""
-        try:
-            if not self.collection:
-                return False
-            
-            self.collection.delete(ids=[training_id])
-            return True
-        except:
-            return False
-
-    def generate_prompt(self, question: str) -> Dict[str, Any]:
-        """
-        Genera y devuelve el prompt completo que se enviaría a OpenAI para depuración.
-        """
-        try:
-            # Obtiene el contexto de la misma forma que lo hace generate_sql
-            context = self.get_relevant_context(question)
-            
-            # Construye el prompt
-            prompt = f"""You are a SQL expert. Generate a SQL query for MySQL based on the following:
-            
-Context from database:
-{context}
-
-User question: {question}
-
-Return only the SQL query without any explanation."""
-            
-            return {
-                "success": True,
-                "question": question,
-                "context_retrieved": context,
-                "full_prompt": prompt
-            }
-        except Exception as e:
-            logger.error(f"Error generando prompt de debug: {e}")
-            return {"success": False, "error": str(e)}
+        # Cliente ChromaDB
+        self.chroma_client = chromadb.PersistentClient(path=chroma_path)
+        
+        # Colecciones separadas (arquitectura oficial de Vanna)
+        self.documentation_collection = self.chroma_client.get_or_create_collection(
+            name="documentation",
+            embedding_function=self.embedding_function
+        )
+        self.ddl_collection = self.chroma_client.get_or_create_collection(
+            name="ddl", 
+            embedding_function=self.embedding_function
+        )
+        self.sql_collection = self.chroma_client.get_or_create_collection(
+            name="sql",
+            embedding_function=self.embedding_function
+        )
+        
+        # Parámetros de búsqueda
+        self.n_results_sql = config.get("n_results_sql", 10)
+        self.n_results_ddl = config.get("n_results_ddl", 10)
+        self.n_results_documentation = config.get("n_results_documentation", 10)
+        
+        # Conexión a base de datos
+        self.db_connection = None
+        self.connect_to_mysql()
+        
+        # Cliente OpenAI para LLM
+        self.llm_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.model = config.get("model", "gpt-4o")
+        
+        logger.info(f"✅ Vanna inicializado con ChromaDB en: {chroma_path}")
     
-    def run_sql(self, sql: str) -> Optional[pd.DataFrame]:
-        """Ejecuta SQL y retorna DataFrame"""
+    # ===== MÉTODOS DE CONEXIÓN A BASE DE DATOS =====
+    
+    def connect_to_mysql(self, host: str = None, dbname: str = None, 
+                        user: str = None, password: str = None, port: int = 3306):
+        """Conecta a MySQL usando credenciales del entorno o las proporcionadas."""
         try:
-            if not self.connection:
-                return None
-                
-            # Reconectar si es necesario
-            self.connection.ping(reconnect=True)
+            self.db_connection = pymysql.connect(
+                host=host or os.getenv("DB_HOST"),
+                user=user or os.getenv("DB_USER"),
+                password=password or os.getenv("DB_PASSWORD"),
+                database=dbname or os.getenv("DB_DATABASE"),
+                port=port or os.getenv("DB_PORT"),
+                cursorclass=pymysql.cursors.DictCursor
+            )
+            logger.info("✅ Conexión a MySQL exitosa")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error conectando a MySQL: {e}")
+            return False
+    
+    def run_sql(self, sql: str) -> pd.DataFrame:
+        """Ejecuta SQL y retorna DataFrame."""
+        if not self.db_connection:
+            raise Exception("No hay conexión a la base de datos")
             
-            # Ejecutar query usando cursor para evitar warning de pandas
-            with self.connection.cursor() as cursor:
+        try:
+            with self.db_connection.cursor() as cursor:
                 cursor.execute(sql)
-                
-                # Obtener datos y columnas
-                data = cursor.fetchall()
-                
-                # Si no hay datos, retornar DataFrame vacío
-                if not data:
-                    return pd.DataFrame()
-                
-                # Crear DataFrame
-                # Los datos ya vienen como lista de diccionarios gracias a DictCursor
-                df = pd.DataFrame(data)
-                return df
-            
+                result = cursor.fetchall()
+            return pd.DataFrame(result)
         except Exception as e:
             logger.error(f"Error ejecutando SQL: {e}")
-            return None
-
-    def ask(self, question: str) -> Dict[str, Any]:
-        """Método principal: genera SQL y ejecuta"""
+            # Intentar reconectar si la conexión se perdió
+            if "MySQL server has gone away" in str(e):
+                self.connect_to_mysql()
+                return self.run_sql(sql)
+            raise e
+    
+    # ===== MÉTODOS DE ENTRENAMIENTO =====
+    
+    def train(self, question: str = None, sql: str = None, 
+              ddl: str = None, documentation: str = None) -> str:
+        """
+        Método principal de entrenamiento. Acepta diferentes tipos de datos.
+        Retorna el ID del documento agregado.
+        """
+        if question and sql:
+            return self.add_question_sql(question, sql)
+        elif ddl:
+            return self.add_ddl(ddl)
+        elif documentation:
+            return self.add_documentation(documentation)
+        else:
+            raise ValueError("Debe proporcionar: (question y sql), ddl, o documentation")
+    
+    def add_question_sql(self, question: str, sql: str) -> str:
+        """Agrega un par pregunta-SQL al training data."""
+        doc_id = f"sql-{uuid.uuid4()}"
+        document = json.dumps({"question": question, "sql": sql})
+        
+        self.sql_collection.add(
+            documents=[document],
+            ids=[doc_id],
+            metadatas=[{"question": question}]
+        )
+        logger.info(f"✅ Agregado Q&A SQL: {doc_id}")
+        return doc_id
+    
+    def add_ddl(self, ddl: str) -> str:
+        """Agrega DDL (estructura de tabla) al training data."""
+        doc_id = f"ddl-{uuid.uuid4()}"
+        self.ddl_collection.add(
+            documents=[ddl],
+            ids=[doc_id]
+        )
+        logger.info(f"✅ Agregado DDL: {doc_id}")
+        return doc_id
+    
+    def add_documentation(self, documentation: str) -> str:
+        """Agrega documentación de negocio al training data."""
+        doc_id = f"doc-{uuid.uuid4()}"
+        self.documentation_collection.add(
+            documents=[documentation],
+            ids=[doc_id]
+        )
+        logger.info(f"✅ Agregada documentación: {doc_id}")
+        return doc_id
+    
+    # ===== MÉTODOS DE BÚSQUEDA/RECUPERACIÓN =====
+    
+    def get_similar_question_sql(self, question: str) -> List[Dict]:
+        """Busca preguntas similares y sus SQLs."""
+        results = self.sql_collection.query(
+            query_texts=[question],
+            n_results=self.n_results_sql
+        )
+        
+        if not results['documents'][0]:
+            return []
+            
+        return [json.loads(doc) for doc in results['documents'][0]]
+    
+    def get_related_ddl(self, question: str) -> List[str]:
+        """Busca DDLs relevantes para la pregunta."""
+        results = self.ddl_collection.query(
+            query_texts=[question],
+            n_results=self.n_results_ddl
+        )
+        return results['documents'][0] if results['documents'][0] else []
+    
+    def get_related_documentation(self, question: str) -> List[str]:
+        """Busca documentación relevante para la pregunta."""
+        results = self.documentation_collection.query(
+            query_texts=[question],
+            n_results=self.n_results_documentation
+        )
+        return results['documents'][0] if results['documents'][0] else []
+    
+    # ===== MÉTODO PRINCIPAL: GENERACIÓN DE SQL =====
+    
+    def generate_sql(self, question: str) -> str:
+        """
+        Genera SQL a partir de una pregunta en lenguaje natural.
+        Este es el método principal que los usuarios llamarán.
+        """
+        # Obtener contexto relevante
+        ddl_list = self.get_related_ddl(question)
+        doc_list = self.get_related_documentation(question)
+        sql_list = self.get_similar_question_sql(question)
+        
+        # Construir prompt
+        prompt = self._construct_prompt(question, ddl_list, doc_list, sql_list)
+        
+        # Llamar al LLM
+        response = self.llm_client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "Eres un experto en SQL. Genera solo la consulta SQL sin explicaciones adicionales."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=800
+        )
+        
+        sql = response.choices[0].message.content.strip()
+        
+        # Limpiar el SQL si viene con markdown
+        if "```sql" in sql:
+            sql = sql.split("```sql")[1].split("```")[0].strip()
+        elif "```" in sql:
+            sql = sql.split("```")[1].split("```")[0].strip()
+            
+        return sql
+    
+    def _construct_prompt(self, question: str, ddl_list: List[str], 
+                         doc_list: List[str], sql_list: List[Dict]) -> str:
+        """Construye el prompt para el LLM con todo el contexto."""
+        prompt_parts = []
+        
+        # Agregar DDLs si existen
+        if ddl_list:
+            prompt_parts.append("DATABASE SCHEMA:")
+            for ddl in ddl_list[:3]:  # Limitar a 3 más relevantes
+                prompt_parts.append(ddl)
+            prompt_parts.append("")
+        
+        # Agregar documentación si existe
+        if doc_list:
+            prompt_parts.append("BUSINESS CONTEXT:")
+            for doc in doc_list[:3]:  # Limitar a 3 más relevantes
+                prompt_parts.append(f"- {doc}")
+            prompt_parts.append("")
+        
+        # Agregar ejemplos SQL si existen
+        if sql_list:
+            prompt_parts.append("SIMILAR EXAMPLES:")
+            for item in sql_list[:5]:  # Limitar a 5 más relevantes
+                prompt_parts.append(f"Question: {item['question']}")
+                prompt_parts.append(f"SQL: {item['sql']}")
+                prompt_parts.append("")
+        
+        # Agregar la pregunta actual
+        prompt_parts.append(f"QUESTION: {question}")
+        prompt_parts.append("SQL:")
+        
+        return "\n".join(prompt_parts)
+    
+    # ===== MÉTODO COMBINADO: ASK (pregunta -> SQL -> resultados) =====
+    
+    def ask(self, question: str, print_results: bool = True) -> pd.DataFrame:
+        """
+        Método de alto nivel: genera SQL y ejecuta la consulta.
+        Retorna el DataFrame con resultados.
+        """
         try:
+            # Generar SQL
             sql = self.generate_sql(question)
-            if not sql:
-                return {"success": False, "error": "No se pudo generar SQL"}
+            if print_results:
+                print(f"Generated SQL:\n{sql}\n")
             
-            result = self.run_sql(sql)
+            # Ejecutar SQL
+            df = self.run_sql(sql)
             
-            if result is not None:
-                return {
-                    "success": True,
-                    "question": question,
-                    "sql": sql,
-                    "result": result.to_dict('records')
-                }
-            else:
-                return {"success": False, "error": "Error ejecutando SQL"}
+            if print_results and df is not None:
+                print(f"Results ({len(df)} rows):")
+                print(df)
                 
+            return df
+            
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            logger.error(f"Error en ask(): {e}")
+            if print_results:
+                print(f"Error: {e}")
+            return None
+    
+    # ===== MÉTODOS DE GESTIÓN =====
+    
+    def get_training_data(self) -> pd.DataFrame:
+        """Obtiene todos los datos de entrenamiento como DataFrame."""
+        data = []
+        
+        # SQL training data
+        sql_data = self.sql_collection.get()
+        for i, doc_id in enumerate(sql_data['ids']):
+            doc = json.loads(sql_data['documents'][i])
+            data.append({
+                'id': doc_id,
+                'type': 'sql',
+                'question': doc.get('question'),
+                'content': doc.get('sql')
+            })
+        
+        # DDL training data
+        ddl_data = self.ddl_collection.get()
+        for i, doc_id in enumerate(ddl_data['ids']):
+            data.append({
+                'id': doc_id,
+                'type': 'ddl',
+                'question': None,
+                'content': ddl_data['documents'][i]
+            })
+        
+        # Documentation training data
+        doc_data = self.documentation_collection.get()
+        for i, doc_id in enumerate(doc_data['ids']):
+            data.append({
+                'id': doc_id,
+                'type': 'documentation',
+                'question': None,
+                'content': doc_data['documents'][i]
+            })
+        
+        return pd.DataFrame(data)
+    
+    def remove_training_data(self, id: str) -> bool:
+        """Elimina un elemento del training data por ID."""
+        try:
+            if id.startswith('sql-'):
+                self.sql_collection.delete(ids=[id])
+            elif id.startswith('ddl-'):
+                self.ddl_collection.delete(ids=[id])
+            elif id.startswith('doc-'):
+                self.documentation_collection.delete(ids=[id])
+            else:
+                logger.error(f"ID no válido: {id}")
+                return False
+                
+            logger.info(f"✅ Eliminado: {id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error eliminando {id}: {e}")
+            return False
+    
+    # ===== MÉTODOS ÚTILES ADICIONALES =====
+    
+    def get_table_names(self) -> List[str]:
+        """Obtiene lista de tablas en la base de datos."""
+        df = self.run_sql("SHOW TABLES")
+        return df.iloc[:, 0].tolist() if df is not None else []
+    
+    def get_table_ddl(self, table_name: str) -> str:
+        """Obtiene el DDL de una tabla específica."""
+        df = self.run_sql(f"SHOW CREATE TABLE `{table_name}`")
+        return df.iloc[0, 1] if df is not None and not df.empty else ""
+    
+    def train_on_ddl_from_database(self, tables: List[str] = None):
+        """Entrena automáticamente con DDLs de las tablas de la BD."""
+        if tables is None:
+            tables = self.get_table_names()
+            
+        for table in tables:
+            try:
+                ddl = self.get_table_ddl(table)
+                if ddl:
+                    self.add_ddl(ddl)
+                    logger.info(f"✅ Entrenado con DDL de tabla: {table}")
+            except Exception as e:
+                logger.error(f"Error con tabla {table}: {e}")
 
-# Alias para compatibilidad
-VannaService = LocalVannaService
+
+# ===== EJEMPLO DE USO =====
+if __name__ == "__main__":
+    # Inicializar Vanna
+    vn = VannaChromaDB()
+    
+    # Entrenar con algunos ejemplos
+    vn.train(
+        question="¿Cuántos usuarios hay en total?",
+        sql="SELECT COUNT(*) as total_users FROM users"
+    )
+    
+    vn.train(
+        documentation="La tabla 'users' contiene información de todos los usuarios registrados. "
+                     "Los usuarios activos tienen status = 'active'."
+    )
+    
+    # Hacer una pregunta
+    df = vn.ask("¿Cuántos usuarios activos tenemos?")

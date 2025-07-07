@@ -1,306 +1,405 @@
-# backend/main.py
-from fastapi import FastAPI, HTTPException, Depends, status
+# main.py - API REST con FastAPI para Vanna
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-import os
+from typing import Optional, Dict, Any, List
+import logging
+from vanna_service import VannaChromaDB
 from dotenv import load_dotenv
+import uvicorn
 
-# Importar servicios locales
-from auth import authenticate_user, create_access_token, get_current_user, get_password_hash
-from database import get_db_connection, test_connection
-from vanna_service import VannaService
-
-# Cargar variables de entorno
+# Configuración
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Inicializar FastAPI
+# Crear aplicación FastAPI
 app = FastAPI(
-    title="API de Consultas Inteligentes",
-    description="Backend con Vanna.ai para consultas SQL naturales",
+    title="Vanna AI API",
+    description="API para consultas SQL inteligentes con Vanna AI",
     version="1.0.0"
 )
 
-# CORS
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8501"],  # Streamlit
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Inicializar servicio de Vanna
-vanna_service = VannaService()
+# Instancia global de Vanna
+vn = None
 
-# Modelos Pydantic
-class QueryRequest(BaseModel):
-    query: str
 
-class ChatRequest(BaseModel):
-    query: str
-    session_id: Optional[str] = None
+# ===== MODELOS PYDANTIC =====
 
-class TrainingRequest(BaseModel):
-    training_type: str  # 'ddl', 'documentation', 'sql'
+class QuestionRequest(BaseModel):
+    question: str
+
+class TrainSQLRequest(BaseModel):
+    question: str
+    sql: str
+
+class TrainDDLRequest(BaseModel):
+    ddl: str
+
+class TrainDocRequest(BaseModel):
+    documentation: str
+
+class TrainRequest(BaseModel):
     question: Optional[str] = None
     sql: Optional[str] = None
     ddl: Optional[str] = None
     documentation: Optional[str] = None
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+class SQLRequest(BaseModel):
+    sql: str
 
-# Usuarios de prueba (en producción usar BD)
-fake_users_db = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": get_password_hash("admin123"),
-    }
-}
 
-@app.post("/auth/login", summary="Generar un token de acceso")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    # La clase OAuth2PasswordRequestForm tiene los campos .username y .password
-    user = authenticate_user(fake_users_db, form_data.username, form_data.password)
-    
-    if not user:
+# ===== EVENTOS DE INICIO =====
+
+@app.on_event("startup")
+async def startup_event():
+    """Inicializa Vanna al iniciar la aplicación."""
+    global vn
+    try:
+        vn = VannaChromaDB()
+        logger.info("✅ Vanna inicializado correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error inicializando Vanna: {e}")
+        raise e
+
+
+# ===== ENDPOINTS ESENCIALES =====
+
+@app.get("/api/health")
+async def health():
+    """Verifica el estado del servicio."""
+    if vn and vn.db_connection:
+        return {
+            "status": "healthy",
+            "database_connected": True
+        }
+    else:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Usuario o contraseña incorrectos",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        
-    access_token_expires = timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 120)))
-    
-    access_token = create_access_token(
-        data={"sub": user["username"]}, expires_delta=access_token_expires
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
-# Endpoints de Estado
-@app.get("/health")
-async def health_check():
-    """Verificar estado del sistema"""
-    mysql_status = test_connection()
-    vanna_status = vanna_service.is_connected()
-    
-    return {
-        "status": "ok",
-        "mysql_connected": mysql_status,
-        "mindsdb_connected": vanna_status,  # Mantengo el nombre para compatibilidad con frontend
-        "vanna_connected": vanna_status,
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/vanna/training-data", summary="Obtener todos los datos de entrenamiento de Vanna")
-async def get_training_data(current_user: dict = Depends(get_current_user)):
-    """
-    Devuelve una lista de todos los fragmentos de conocimiento (DDL, docs, SQL)
-    con los que Vanna ha sido entrenado.
-    """
-    try:
-        data = vanna_service.get_all_training_data()
-        return {"success": True, "count": len(data), "data": data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Endpoints de MySQL
-@app.get("/mysql/tables")
-async def get_tables(current_user: dict = Depends(get_current_user)):
-    """Obtener lista de tablas"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SHOW TABLES")
-        tables = [table[0] for table in cursor.fetchall()]
-        cursor.close()
-        conn.close()
-        return {"tables": tables}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/mysql/table/{table_name}")
-async def get_table_structure(table_name: str, current_user: dict = Depends(get_current_user)):
-    """Obtener estructura de una tabla"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(f"DESCRIBE {table_name}")
-        structure = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return {"data": structure}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/vanna/debug-prompt", summary="[DEBUG] Ver el prompt enviado a OpenAI")
-async def debug_vanna_prompt(request: QueryRequest, current_user: dict = Depends(get_current_user)):
-    """
-    Endpoint de depuración para ver el contexto y el prompt completo que Vanna 
-    construye para una pregunta específica antes de enviarlo a OpenAI.
-    """
-    try:
-        debug_info = vanna_service.generate_prompt(request.query)
-        return debug_info
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/mysql/query")
-async def execute_query(request: QueryRequest, current_user: dict = Depends(get_current_user)):
-    """Ejecutar query SQL directamente"""
-    try:
-        # Validación básica de seguridad
-        query_upper = request.query.upper()
-        dangerous_keywords = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE']
-        if any(keyword in query_upper for keyword in dangerous_keywords):
-            raise HTTPException(status_code=400, detail="Operación no permitida")
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(request.query)
-        results = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        return {
-            "success": True,
-            "data": results,
-            "query": request.query
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "query": request.query
-        }
-
-# Endpoints de Vanna/MindsDB (mantengo el nombre para compatibilidad)
-@app.post("/mindsdb/chat")
-async def chat_with_vanna(request: ChatRequest, current_user: dict = Depends(get_current_user)):
-    """Hacer preguntas en lenguaje natural"""
-    try:
-        # Generar SQL desde pregunta natural
-        sql = vanna_service.generate_sql(request.query)
-        
-        if not sql:
-            return {
-                "success": False,
-                "answer": "No pude generar una consulta SQL para tu pregunta. ¿Podrías reformularla?",
-                "sql": None
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "database_connected": False
             }
+        )
+
+
+@app.post("/api/generate-sql")
+async def generate_sql(request: QuestionRequest):
+    """Genera SQL a partir de una pregunta en lenguaje natural."""
+    try:
+        question = request.question.strip()
         
-        # Ejecutar SQL
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        results = cursor.fetchall()
-        cursor.close()
-        conn.close()
+        if not question:
+            raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía")
         
-        # Generar respuesta natural - siempre usar el método mejorado
-        answer = vanna_service.generate_summary(request.query, sql, results)
-        
-        # Si no hay resumen generado (por error), crear fallback mejorado
-        if not answer:
-            if not results:
-                answer = "No encontré resultados para tu consulta. Parece que no hay datos que coincidan con lo que buscas."
-            elif len(results) == 1:
-                # Para resultados únicos
-                if isinstance(results[0], dict) and len(results[0]) == 1:
-                    value = list(results[0].values())[0]
-                    answer = f"Según los datos disponibles, el resultado es: {value}"
-                else:
-                    answer = f"Encontré un registro con la siguiente información: {results[0]}"
-            else:
-                answer = f"Encontré {len(results)} registros que coinciden con tu búsqueda."
-                if len(results) <= 5:
-                    answer += " Aquí están todos los resultados:"
-                    for i, row in enumerate(results):
-                        answer += f"\n{i+1}. {row}"
-                else:
-                    answer += " Te muestro los primeros 5:"
-                    for i, row in enumerate(results[:5]):
-                        answer += f"\n{i+1}. {row}"
+        sql = vn.generate_sql(question)
         
         return {
             "success": True,
-            "answer": answer,
-            "sql": sql,
-            "raw_results": results[:10] if results else []  # Limitar resultados
+            "question": question,
+            "sql": sql
         }
         
     except Exception as e:
+        logger.error(f"Error generando SQL: {e}")
         return {
             "success": False,
-            "answer": f"Ocurrió un error al procesar tu pregunta: {str(e)}",
-            "sql": None,
             "error": str(e)
         }
 
-# Endpoints de Entrenamiento de Vanna
-@app.post("/vanna/train")
-async def train_vanna(request: TrainingRequest, current_user: dict = Depends(get_current_user)):
-    """Entrenar Vanna con nuevos ejemplos"""
+
+@app.post("/api/ask")
+async def ask(request: QuestionRequest):
+    """Genera SQL y ejecuta la consulta, retornando los resultados."""
     try:
-        result = False
+        question = request.question.strip()
         
-        if request.training_type == "ddl" and request.ddl:
-            result = vanna_service.train_ddl(request.ddl)
-        elif request.training_type == "documentation" and request.documentation:
-            result = vanna_service.train_documentation(request.documentation)
-        elif request.training_type == "sql" and request.question and request.sql:
-            result = vanna_service.train_sql(request.question, request.sql)
-        else:
-            raise HTTPException(status_code=400, detail="Parámetros de entrenamiento inválidos")
+        if not question:
+            raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía")
         
-        if result:
-            return {"success": True, "message": "Entrenamiento completado"}
+        # Generar SQL
+        sql = vn.generate_sql(question)
+        
+        # Ejecutar SQL
+        df = vn.run_sql(sql)
+        
+        # Convertir DataFrame a JSON
+        if df is not None:
+            results = df.to_dict('records')
+            return {
+                "success": True,
+                "question": question,
+                "sql": sql,
+                "results": results,
+                "row_count": len(df)
+            }
         else:
-            return {"success": False, "message": "Error en el entrenamiento"}
+            return {
+                "success": False,
+                "question": question,
+                "sql": sql,
+                "error": "Error ejecutando la consulta"
+            }
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error en ask: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
-@app.get("/vanna/training-data")
-async def get_training_data(current_user: dict = Depends(get_current_user)):
-    """Obtener datos de entrenamiento actuales"""
-    try:
-        data = vanna_service.get_training_data()
-        return {"success": True, "data": data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/vanna/remove-training")
-async def remove_training(training_id: str, current_user: dict = Depends(get_current_user)):
-    """Eliminar un dato de entrenamiento"""
+@app.post("/api/train")
+async def train(request: TrainRequest):
+    """Entrena el modelo con nuevos datos."""
     try:
-        result = vanna_service.remove_training(training_id)
-        if result:
-            return {"success": True, "message": "Dato de entrenamiento eliminado"}
+        # Validar que al menos un tipo de entrenamiento esté presente
+        if request.question and request.sql:
+            doc_id = vn.train(question=request.question, sql=request.sql)
+            return {
+                "success": True,
+                "type": "sql",
+                "id": doc_id
+            }
+        elif request.ddl:
+            doc_id = vn.train(ddl=request.ddl)
+            return {
+                "success": True,
+                "type": "ddl",
+                "id": doc_id
+            }
+        elif request.documentation:
+            doc_id = vn.train(documentation=request.documentation)
+            return {
+                "success": True,
+                "type": "documentation",
+                "id": doc_id
+            }
         else:
-            return {"success": False, "message": "No se pudo eliminar el dato"}
+            raise HTTPException(
+                status_code=400,
+                detail="Debe proporcionar: (question y sql), ddl, o documentation"
+            )
+            
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error entrenando: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
-# Endpoint de inicio
-@app.get("/")
+
+@app.get("/api/training-data")
+async def get_training_data():
+    """Obtiene todos los datos de entrenamiento."""
+    try:
+        df = vn.get_training_data()
+        data = df.to_dict('records')
+        
+        return {
+            "success": True,
+            "count": len(data),
+            "data": data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo training data: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.delete("/api/training-data/{id}")
+async def remove_training_data(id: str):
+    """Elimina un elemento del training data."""
+    try:
+        success = vn.remove_training_data(id)
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Eliminado: {id}"
+            }
+        else:
+            return {
+                "success": False,
+                "error": "No se pudo eliminar el elemento"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error eliminando: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/run-sql")
+async def run_sql(request: SQLRequest):
+    """Ejecuta una consulta SQL directamente (útil para testing)."""
+    try:
+        sql = request.sql.strip()
+        
+        if not sql:
+            raise HTTPException(status_code=400, detail="El SQL no puede estar vacío")
+        
+        df = vn.run_sql(sql)
+        
+        if df is not None:
+            results = df.to_dict('records')
+            return {
+                "success": True,
+                "results": results,
+                "row_count": len(df)
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Error ejecutando SQL"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error ejecutando SQL: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ===== ENDPOINTS ADICIONALES ÚTILES =====
+
+@app.get("/api/tables")
+async def get_tables():
+    """Obtiene la lista de tablas disponibles en la base de datos."""
+    try:
+        tables = vn.get_table_names()
+        return {
+            "success": True,
+            "tables": tables,
+            "count": len(tables)
+        }
+    except Exception as e:
+        logger.error(f"Error obteniendo tablas: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/table/{table_name}")
+async def get_table_schema(table_name: str):
+    """Obtiene el esquema de una tabla específica."""
+    try:
+        ddl = vn.get_table_ddl(table_name)
+        if ddl:
+            return {
+                "success": True,
+                "table": table_name,
+                "ddl": ddl
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Tabla '{table_name}' no encontrada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error obteniendo esquema de {table_name}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/train/auto-ddl")
+async def train_auto_ddl():
+    """Entrena automáticamente con los DDLs de todas las tablas."""
+    try:
+        tables = vn.get_table_names()
+        trained_count = 0
+        errors = []
+        
+        for table in tables:
+            try:
+                vn.train_on_ddl_from_database([table])
+                trained_count += 1
+            except Exception as e:
+                errors.append({"table": table, "error": str(e)})
+        
+        return {
+            "success": True,
+            "trained_tables": trained_count,
+            "total_tables": len(tables),
+            "errors": errors
+        }
+    except Exception as e:
+        logger.error(f"Error en entrenamiento automático: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ===== DOCUMENTACIÓN INTERACTIVA =====
+
+@app.get("/", tags=["Root"])
 async def root():
+    """Endpoint raíz con información de la API."""
     return {
-        "message": "API de Consultas Inteligentes con Vanna.ai",
+        "message": "🤖 Vanna AI API",
         "version": "1.0.0",
+        "documentation": "/docs",
         "endpoints": {
-            "health": "/health",
-            "docs": "/docs",
-            "auth": "/auth/login"
+            "health": "/api/health",
+            "generate_sql": "/api/generate-sql",
+            "ask": "/api/ask",
+            "train": "/api/train",
+            "training_data": "/api/training-data",
+            "run_sql": "/api/run-sql",
+            "tables": "/api/tables"
         }
     }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# ===== INICIALIZACIÓN =====
+
+if __name__ == '__main__':
+    print("""
+    ╔══════════════════════════════════════════════════════╗
+    ║             🤖 VANNA AI API - FastAPI 🤖             ║
+    ╚══════════════════════════════════════════════════════╝
+    """)
+    
+    print("🚀 Iniciando API de Vanna...")
+    print("\n📡 Endpoints disponibles:")
+    print("  GET    /api/health             - Estado del servicio")
+    print("  POST   /api/generate-sql       - Generar SQL desde pregunta")
+    print("  POST   /api/ask                - Generar SQL y ejecutar")
+    print("  POST   /api/train              - Entrenar con nuevos datos")
+    print("  GET    /api/training-data      - Ver datos de entrenamiento")
+    print("  DELETE /api/training-data/<id> - Eliminar dato de entrenamiento")
+    print("  POST   /api/run-sql            - Ejecutar SQL directamente")
+    print("  GET    /api/tables             - Listar tablas disponibles")
+    print("  GET    /api/table/<name>       - Ver esquema de tabla")
+    print("  POST   /api/train/auto-ddl     - Entrenar con DDLs automáticamente")
+    print("\n📚 Documentación interactiva disponible en:")
+    print("  http://localhost:8000/docs     - Swagger UI")
+    print("  http://localhost:8000/redoc    - ReDoc")
+    
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
