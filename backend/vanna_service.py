@@ -86,24 +86,35 @@ class VannaChromaDB:
             logger.error(f"❌ Error conectando a MySQL: {e}")
             return False
     
+    # en vanna_service.py
     def run_sql(self, sql: str) -> pd.DataFrame:
-        """Ejecuta SQL y retorna DataFrame."""
+        """
+        Ejecuta SOLAMENTE consultas SELECT y retorna los resultados.
+        Rechaza cualquier otra operación (INSERT, UPDATE, DELETE, etc.).
+        """
+        # 1. Limpiar y verificar que la consulta sea de solo lectura
+        cleaned_sql = sql.strip().upper()
+        
+        if not cleaned_sql.startswith('SELECT'):
+            logger.warning(f"⚠️  Intento de ejecutar una consulta no permitida: {sql}")
+            # Lanzamos un error de permiso que será capturado por la API
+            raise PermissionError("Operación no permitida. Esta API solo puede ejecutar consultas SELECT.")
+
+        # 2. Si la validación pasa, proceder a ejecutar la consulta
         if not self.db_connection:
             raise Exception("No hay conexión a la base de datos")
-            
+        
         try:
             with self.db_connection.cursor() as cursor:
                 cursor.execute(sql)
                 result = cursor.fetchall()
             return pd.DataFrame(result)
         except Exception as e:
-            logger.error(f"Error ejecutando SQL: {e}")
-            # Intentar reconectar si la conexión se perdió
+            logger.error(f"Error ejecutando SQL SELECT: {e}")
             if "MySQL server has gone away" in str(e):
                 self.connect_to_mysql()
                 return self.run_sql(sql)
             raise e
-    
     # ===== MÉTODOS DE ENTRENAMIENTO =====
     
     def train(self, question: str = None, sql: str = None, 
