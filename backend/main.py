@@ -172,7 +172,7 @@ async def train(request: TrainRequest):
                 "id": doc_id
             }
         elif request.ddl:
-            doc_id = vn.train(ddl=request.ddl)
+            doc_id = vn.train(ddl=vn.get_table_ddl(request.ddl))
             return {
                 "success": True,
                 "type": "ddl",
