@@ -154,7 +154,8 @@ async def ask(request: QuestionRequest):
         logger.error(f"Error en ask: {e}")
         return {
             "success": False,
-            "error": str(e)
+            "error": str(e),
+            "sql": sql
         }
 
 

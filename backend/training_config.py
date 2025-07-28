@@ -34,15 +34,7 @@ DOCUMENTATION = [
 # Ejemplos de preguntas y SQL
 SQL_EXAMPLES = [
     {
-        "question": "¿Cuántos usuarios hay en total?",
-        "sql": "SELECT COUNT(*) as total_users FROM users"
-    },
-    {
-        "question": "¿Cuántos usuarios totales hay registrados en el sistema?",
-        "sql": "SELECT COUNT(*) AS total_usuarios FROM users;"
-    },
-    {
-        "question": "¿Cuántos usuarios activos (no eliminados lógicamente) hay?",
+        "question": "¿Cuántos usuarios hay?",
         "sql": "SELECT COUNT(*) AS total_usuarios_activos FROM users WHERE deleted_at IS NULL;"
     },
     {
@@ -50,34 +42,26 @@ SQL_EXAMPLES = [
         "sql": "SELECT COUNT(*) AS total_usuarios_nuevos FROM users WHERE created_at BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59';"
     },
     {
-        "question": "Obtener el listado de usuarios (ID, nombre, email) que se registraron en un período de tiempo determinado.",
-        "sql": "SELECT id, name, surname, email, created_at FROM users WHERE created_at BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59';"
-    },
-    
-    {
-        "question": "¿Cuántas solicitudes se publicaron (iniciaron) en un rango de fechas?",
-        "sql": "SELECT COUNT(*) AS total_solicitudes_publicadas FROM requests WHERE start_date BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59';"
+        "question":"Dame un reporte que desglose por tipo de trámite y por estado final, cuántas solicitudes se iniciaron el mes pasado.",
+        "sql":"WITH ultimo_estado AS (SELECT r.id AS request_id, p.name AS tramite, rs.description AS estado, ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY rsr.date DESC) AS rn FROM requests r JOIN request_state_records rsr ON rsr.request_id = r.id JOIN request_states rs ON rsr.request_status_id = rs.id JOIN procedures p ON p.id = r.procedure_id WHERE DATE(r.created_at) BETWEEN :fecha_inicio AND :fecha_fin) SELECT tramite, SUM(CASE WHEN estado = 'Borrador' THEN 1 ELSE 0 END) AS borrador, SUM(CASE WHEN estado = 'Publicado' THEN 1 ELSE 0 END) AS publicado, SUM(CASE WHEN estado = 'En proceso' THEN 1 ELSE 0 END) AS en_proceso, SUM(CASE WHEN estado = 'Finalizado' THEN 1 ELSE 0 END) AS finalizado, SUM(CASE WHEN estado = 'Rechazado' THEN 1 ELSE 0 END) AS rechazado, SUM(CASE WHEN estado = 'Revocado' THEN 1 ELSE 0 END) AS revocado, COUNT(*) AS total FROM ultimo_estado WHERE rn = 1 GROUP BY tramite ORDER BY tramite;"
     },
     {
-        "question": "¿Cuál es el recuento de todas las solicitudes agrupadas por su estado actual (el más reciente)?",
-        "sql": "SELECT rs.description AS estado_actual, COUNT(r.id) AS cantidad\nFROM requests r\nINNER JOIN (\n    -- Subconsulta para obtener el ID del último estado de cada solicitud\n    SELECT rsr.request_id, rsr.request_status_id\n    FROM request_state_records rsr\n    INNER JOIN (\n        SELECT request_id, MAX(date) AS max_date\n        FROM request_state_records\n        GROUP BY request_id\n    ) latest_rsr ON rsr.request_id = latest_rsr.request_id AND rsr.date = latest_rsr.max_date\n) current_status ON r.id = current_status.request_id\nINNER JOIN request_states rs ON current_status.request_status_id = rs.id\nGROUP BY rs.description\nORDER BY cantidad DESC;"
+        "question":"Muéstrame un resumen general del estado actual de todas las solicitudes en el sistema, agrupadas por cada estado.",
+        "sql":"WITH ultimo_estado AS (SELECT r.id AS request_id, rs.description AS estado, ROW_NUMBER() OVER (PARTITION BY r.id ORDER BY rsr.date DESC) AS rn FROM requests r JOIN request_state_records rsr ON rsr.request_id = r.id JOIN request_states rs ON rsr.request_status_id = rs.id) SELECT estado, COUNT(request_id) AS total_solicitudes FROM ultimo_estado WHERE rn = 1 GROUP BY estado ORDER BY total_solicitudes DESC;"
     },
     {
-        "question": "Listar las solicitudes iniciadas en un rango de fechas que actualmente se encuentran en un estado específico (ej: 'En proceso').",
-        "sql": "SELECT r.id AS solicitud_id, r.start_date, p.name AS tramite, u.email AS solicitante, rs.description as estado_actual\nFROM requests r\nINNER JOIN (\n    -- Subconsulta para obtener el ID del último estado de cada solicitud\n    SELECT rsr.request_id, rsr.request_status_id\n    FROM request_state_records rsr\n    INNER JOIN (\n        SELECT request_id, MAX(date) AS max_date\n        FROM request_state_records\n        GROUP BY request_id\n    ) latest_rsr ON rsr.request_id = latest_rsr.request_id AND rsr.date = latest_rsr.max_date\n) current_status ON r.id = current_status.request_id\nINNER JOIN request_states rs ON current_status.request_status_id = rs.id\nINNER JOIN procedures p ON r.procedure_id = p.id\nINNER JOIN users u ON r.user_id = u.id\nWHERE r.start_date BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59' AND rs.description = 'En proceso';"
+        "question":"Quiero saber el estado actual de la solicitud más reciente del trámite 'Licencia de Conducir' para el usuario con DNI 12345678.",
+        "sql":"SELECT u.name AS usuario, p.name AS tramite, r.start_date AS fecha_inicio, rs.description AS estado_actual FROM requests r JOIN users u ON r.user_id = u.id JOIN procedures p ON r.procedure_id = p.id JOIN (SELECT rsr1.request_id, rsr1.request_status_id FROM request_state_records rsr1 JOIN (SELECT request_id, MAX(date) AS max_date FROM request_state_records GROUP BY request_id) latest ON rsr1.request_id = latest.request_id AND rsr1.date = latest.max_date) rsr ON rsr.request_id = r.id JOIN request_states rs ON rs.id = rsr.request_status_id WHERE u.dni = :dni_usuario AND p.name LIKE :nombre_tramite_similar AND r.id = (SELECT r2.id FROM requests r2 JOIN users u2 ON r2.user_id = u2.id JOIN procedures p2 ON r2.procedure_id = p2.id WHERE u2.dni = :dni_usuario AND p2.name LIKE :nombre_tramite_similar ORDER BY r2.created_at DESC LIMIT 1);"
     },
     {
-        "question": "¿Cuántas solicitudes hay por cada tipo de trámite activo (no en borrador)?",
-        "sql": "SELECT p.name AS tipo_de_tramite, COUNT(r.id) AS cantidad_solicitudes\nFROM requests r\nINNER JOIN procedures p ON r.procedure_id = p.id\nWHERE p.procedure_status_id = 1 -- Asumiendo que el estado 1 es 'publicado' o 'activo'\nGROUP BY p.name\nORDER BY cantidad_solicitudes DESC;"
+        "question":"Necesito el desglose día por día de cuántas solicitudes activas se iniciaron la semana pasada para todos los trámites con el nombre similar a 'Licencia de Conducir'.",
+        "sql":"SELECT DATE(r.start_date) AS fecha, COUNT(r.id) AS cantidad_solicitudes FROM requests r INNER JOIN procedures p ON r.procedure_id = p.id INNER JOIN (SELECT rsr.request_id, rsr.request_status_id FROM request_state_records rsr INNER JOIN (SELECT request_id, MAX(date) AS max_date FROM request_state_records GROUP BY request_id) latest_rsr ON rsr.request_id = latest_rsr.request_id AND rsr.date = latest_rsr.max_date) current_status ON r.id = current_status.request_id WHERE current_status.request_status_id != 1 AND p.procedure_status_id = 1 AND p.name LIKE :nombre_tramite_similar AND DATE(r.start_date) BETWEEN :fecha_inicio AND :fecha_fin GROUP BY fecha ORDER BY fecha ASC;"
     },
     {
-        "question": "¿Cuántas solicitudes se iniciaron entre dos fechas, agrupadas por tipo de trámite?",
-        "sql": "SELECT p.name AS tipo_de_tramite, COUNT(r.id) AS cantidad_solicitudes\nFROM requests r\nINNER JOIN procedures p ON r.procedure_id = p.id\nWHERE r.start_date BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59' AND p.procedure_status_id = 1\nGROUP BY p.name\nORDER BY cantidad_solicitudes DESC;"
+        "question":"¿Cuál fue el volumen de trabajo del agente con DNI 12345678? Quiero saber cuántas solicitudes atendió o cambió de estado cada día durante este mes.",
+        "sql":"SELECT u.name AS agente, u.dni, p.name AS tramite, rs.description AS estado_cambiado, COUNT(*) AS cantidad_cambios FROM request_state_records rsr JOIN users u ON u.id = rsr.user_id JOIN request_states rs ON rs.id = rsr.request_status_id JOIN requests r ON r.id = rsr.request_id JOIN procedures p ON p.id = r.procedure_id JOIN model_has_roles mhr ON mhr.model_id = u.id JOIN roles ro ON ro.id = mhr.role_id WHERE ro.id = :id_rol AND u.dni = :dni_agente AND DATE(rsr.created_at) BETWEEN :fecha_inicio AND :fecha_fin AND rs.id IN (:lista_de_estados_atendidos) GROUP BY u.name, u.dni, p.name, rs.description;"
     },
-    {
-        "question": "¿Cuántas solicitudes del trámite 'Licencia de Conducir' se iniciaron en un período de tiempo?",
-        "sql": "SELECT COUNT(r.id) AS cantidad_licencias\nFROM requests r\nINNER JOIN procedures p ON r.procedure_id = p.id\nWHERE p.name = 'Licencia de Conducir' -- Usar el nombre exacto del trámite\nAND r.start_date BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59';"
-    },
+
 ]
 
 

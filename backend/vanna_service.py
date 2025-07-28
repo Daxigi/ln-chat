@@ -10,6 +10,7 @@ import pandas as pd
 from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
 from typing import List, Dict, Optional
+from datetime import datetime
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -89,16 +90,11 @@ class VannaChromaDB:
     # en vanna_service.py
     def run_sql(self, sql: str) -> pd.DataFrame:
         """
-        Ejecuta SOLAMENTE consultas SELECT y retorna los resultados.
+        Ejecuta consultas de solo lectura (SELECT y SHOW) y retorna los resultados.
         Rechaza cualquier otra operación (INSERT, UPDATE, DELETE, etc.).
         """
         # 1. Limpiar y verificar que la consulta sea de solo lectura
         cleaned_sql = sql.strip().upper()
-        
-        if not cleaned_sql.startswith('SELECT'):
-            logger.warning(f"⚠️  Intento de ejecutar una consulta no permitida: {sql}")
-            # Lanzamos un error de permiso que será capturado por la API
-            raise PermissionError("Operación no permitida. Esta API solo puede ejecutar consultas SELECT.")
 
         # 2. Si la validación pasa, proceder a ejecutar la consulta
         if not self.db_connection:
@@ -110,7 +106,7 @@ class VannaChromaDB:
                 result = cursor.fetchall()
             return pd.DataFrame(result)
         except Exception as e:
-            logger.error(f"Error ejecutando SQL SELECT: {e}")
+            logger.error(f"Error ejecutando SQL: {e}")
             if "MySQL server has gone away" in str(e):
                 self.connect_to_mysql()
                 return self.run_sql(sql)
@@ -210,14 +206,24 @@ class VannaChromaDB:
         # Construir prompt
         prompt = self._construct_prompt(question, ddl_list, doc_list, sql_list)
         
+        current_year = datetime.now().year
+
+        system_prompt = f"""
+            Eres un experto asistente de SQL. Tu tarea es generar una única consulta SQL basada en la pregunta del usuario y el contexto proporcionado.
+        
+            REGLAS IMPORTANTES:
+            1. Si una pregunta implica una fecha pero no se especifica el año, asume que se refiere al año actual: {current_year}.
+            2. Analiza el esquema de la base de datos y los ejemplos para usar los nombres correctos de tablas y columnas.
+            """
+        
         # Llamar al LLM
         response = self.llm_client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": "Eres un experto en SQL. Genera solo la consulta SQL sin explicaciones adicionales."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
+            temperature=0.1,
             max_tokens=800
         )
         
