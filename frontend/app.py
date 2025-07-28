@@ -72,8 +72,6 @@ def initialize_session_state():
         st.session_state.system_status = None
     if 'training_data' not in st.session_state:
         st.session_state.training_data = []
-    if 'show_sql' not in st.session_state:
-        st.session_state.show_sql = True
     if 'table_names' not in st.session_state:
         st.session_state.table_names = []
 
@@ -139,18 +137,6 @@ def sidebar():
         user_questions = len([m for m in st.session_state.chat_history if m["role"] == "user"])
         st.metric("Preguntas realizadas", user_questions)
         
-        # Cargar datos de entrenamiento
-        if st.button("📚 Ver Datos de Entrenamiento", use_container_width=True):
-            result = make_api_request("/training-data")
-            if result["success"]:
-                st.session_state.training_data = result["data"]["data"]
-                st.success(f"✅ {result['data']['count']} elementos cargados")
-        
-        # Opciones
-        st.markdown("---")
-        st.subheader("⚙️ Opciones")
-        st.session_state.show_sql = st.checkbox("Mostrar SQL generado", value=True)
-        
         # Acciones
         st.markdown("---")
         st.subheader("🛠️ Acciones")
@@ -210,18 +196,6 @@ def chat_interface():
         with st.chat_message(message["role"]):
             st.write(message["content"])
             
-            # Mostrar SQL si está disponible
-            if message["role"] == "assistant" and message.get("sql") and st.session_state.show_sql:
-                with st.expander("🔍 Ver SQL generado"):
-                    st.code(message["sql"], language="sql")
-                    
-                    # Botón para copiar SQL
-                    st.button(
-                        "📋 Copiar SQL", 
-                        key=f"copy_{message.get('msg_id', '')}", 
-                        on_click=lambda sql=message["sql"]: st.write(sql)
-                    )
-            
             # Mostrar resultados si existen
             if message.get("results_df") is not None:
                 st.dataframe(message["results_df"], use_container_width=True)
@@ -257,11 +231,6 @@ def process_question(question: str):
                     df = None
                 
                 st.write(response)
-                
-                # Mostrar SQL si está habilitado
-                if sql and st.session_state.show_sql:
-                    with st.expander("🔍 Ver SQL generado"):
-                        st.code(sql, language="sql")
                 
                 # Mostrar resultados
                 if df is not None:
