@@ -11,3 +11,7 @@ users.db
 # Archivos generados por Python
 __pycache__/
 *.pyc
+
+backend/backend/
+venv/
+
