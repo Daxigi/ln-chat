@@ -17,6 +17,8 @@ SELECTED_TABLES = [
     "request_states",
     "procedures",
     "request_state_records",
+    "request_actions",
+    "actions",
 ]
 
 # Documentación de negocio

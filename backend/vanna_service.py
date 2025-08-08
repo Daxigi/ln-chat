@@ -230,10 +230,10 @@ class VannaChromaDB:
         sql = response.choices[0].message.content.strip()
         
         # Limpiar el SQL si viene con markdown
-        if "```sql" in sql:
-            sql = sql.split("```sql")[1].split("```")[0].strip()
-        elif "```" in sql:
-            sql = sql.split("```")[1].split("```")[0].strip()
+        if "sql" in sql:
+            sql = sql.split("sql")[1].split("")[0].strip()
+        elif "" in sql:
+            sql = sql.split("")[1].split("")[0].strip()
             
         return sql
     
