@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 # Configuración de la API
-API_BASE_URL = os.getenv("STREAMLIT_API_BASE_URL")
+API_BASE_URL = os.getenv("STREAMLIT_API_BASE_URL", "http://backend:8000")
 
 # Estilos CSS personalizados
 st.markdown("""
