@@ -21,7 +21,7 @@ services:
     container_name: vanna-frontend
     env_file: .env
     environment:
-      STREAMLIT_API_BASE_URL: ${STREAMLIT_API_BASE_URL:-http://backend:${API_PORT:-8000}}
+      STREAMLIT_API_BASE_URL: ${STREAMLIT_API_BASE_URL:-http://172.25.50.50:8000}
       STREAMLIT_SERVER_PORT: ${STREAMLIT_SERVER_PORT:-8501}
       STREAMLIT_SERVER_HEADLESS: ${STREAMLIT_SERVER_HEADLESS:-true}
     ports:
