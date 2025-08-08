@@ -1,0 +1,7 @@
+pandas
+pymysql
+openai
+chromadb
+python-dotenv
+fastapi
+uvicorn[standard]

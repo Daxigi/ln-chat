@@ -2,35 +2,23 @@ version: "3.9"
 
 services:
   backend:
-    build: .
-    container_name: vanna-back
-    command: flask run --host=0.0.0.0 --port=5000
-    environment:
-      - FLASK_APP=backend/app.py
-      - FLASK_RUN_HOST=0.0.0.0
-      - FLASK_RUN_PORT=5000
-      - PYTHONUNBUFFERED=1
-    env_file:
-      - .env
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: vanna-backend
     ports:
-      - "5000:5000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]  # ajustá a /api/ping si existe
-      interval: 10s
-      timeout: 3s
-      retries: 5
+      - "8000:8000"
+    env_file: .env
+    restart: unless-stopped
 
   frontend:
-    build: .
-    container_name: vanna-front
-    command: streamlit run frontend/app.py --server.address=0.0.0.0 --server.port=8501
-    environment:
-      - PYTHONUNBUFFERED=1
-    env_file:
-      - .env
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: vanna-frontend
     ports:
       - "8501:8501"
-
+    env_file: .env
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
+    restart: unless-stopped
