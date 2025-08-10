@@ -113,15 +113,15 @@ def get_table_schema(table_name: str) -> pd.DataFrame:
 def sidebar():
     """Sidebar con información y controles"""
     with st.sidebar:
-        st.header("🎛️ Panel de Control")
+        st.header("Panel de Control")
         
         # Estado del sistema
-        st.subheader("📊 Estado del Sistema")
+        st.subheader(" Estado del Sistema")
         if st.session_state.system_status:
             if st.session_state.system_status.get("database_connected"):
                 st.success("✅ Sistema Conectado")
             else:
-                st.error("❌ Base de datos desconectada")
+                st.error("Base de datos desconectada")
         else:
             st.info("🔍 Verificando conexión...")
         
@@ -129,38 +129,15 @@ def sidebar():
             check_system_status()
             st.rerun()
         
-        # Estadísticas
-        st.markdown("---")
-        st.subheader("📈 Estadísticas")
-        
-        # Contar preguntas del usuario
-        user_questions = len([m for m in st.session_state.chat_history if m["role"] == "user"])
-        st.metric("Preguntas realizadas", user_questions)
-        
         # Acciones
-        st.markdown("---")
-        st.subheader("🛠️ Acciones")
-        
-        if st.button("🗑️ Limpiar Conversación", use_container_width=True):
-            st.session_state.chat_history = []
-            st.session_state.chat_session_id = str(uuid.uuid4())
-            st.success("✅ Conversación limpiada")
-            st.rerun()
-        
-        if st.button("🔄 Recargar Tablas", use_container_width=True):
-            get_table_names()
-            st.success("✅ Tablas actualizadas")
         
         # Información
-        st.markdown("---")
-        st.caption("🤖 Powered by Vanna AI")
-        st.caption("📊 ChromaDB + OpenAI")
 
 
 def chat_interface():
     """Interfaz principal de chat"""
-    st.header("💬 Asistente SQL Inteligente")
-    st.markdown("Pregunta en lenguaje natural y obtén consultas SQL precisas")
+    st.header("Pregunta para generar reportes")
+    # st.markdown("Pregunta en lenguaje natural y obtén consultas SQL precisas")
     
     # Verificar estado del sistema
     if not st.session_state.system_status:
@@ -179,16 +156,11 @@ def chat_interface():
             **Consultas básicas:**
             - ¿Cuántos registros hay en la tabla users?
             - Muéstrame todos los usuarios activos
-            - ¿Cuáles son las últimas 10 órdenes?
-            - Lista todas las tablas disponibles
+    
             """)
         with col2:
             st.markdown("""
             **Consultas avanzadas:**
-            - ¿Cuál es el total de ventas por mes?
-            - Usuarios que no han hecho pedidos
-            - Top 5 productos más vendidos
-            - Comparar ventas de este año vs el anterior
             """)
     
     # Mostrar historial de chat
@@ -239,7 +211,7 @@ def process_question(question: str):
                     # Opción de descarga
                     csv = df.to_csv(index=False)
                     st.download_button(
-                        label="📥 Descargar CSV",
+                        label=" Descargar CSV",
                         data=csv,
                         file_name=f"resultados_{st.session_state.chat_session_id[:8]}.csv",
                         mime="text/csv",
@@ -266,245 +238,245 @@ def process_question(question: str):
                 })
 
 
-def data_explorer():
-    """Explorador de datos y esquemas"""
-    st.header("🔍 Explorador de Base de Datos")
+# def data_explorer():
+#     """Explorador de datos y esquemas"""
+#     st.header("🔍 Explorador de Base de Datos")
     
-    # Obtener tablas si no están cargadas
-    if not st.session_state.table_names:
-        with st.spinner("Cargando tablas..."):
-            get_table_names()
+#     # Obtener tablas si no están cargadas
+#     if not st.session_state.table_names:
+#         with st.spinner("Cargando tablas..."):
+#             get_table_names()
     
-    if st.session_state.table_names:
-        # Selector de tabla
-        selected_table = st.selectbox(
-            "Selecciona una tabla:",
-            [""] + st.session_state.table_names,
-            format_func=lambda x: "Selecciona una tabla..." if x == "" else x
-        )
+#     if st.session_state.table_names:
+#         # Selector de tabla
+#         selected_table = st.selectbox(
+#             "Selecciona una tabla:",
+#             [""] + st.session_state.table_names,
+#             format_func=lambda x: "Selecciona una tabla..." if x == "" else x
+#         )
         
-        if selected_table:
-            # Tabs para diferentes vistas
-            tab1, tab2, tab3 = st.tabs(["📋 Estructura", "📊 Datos", "🔧 SQL Personalizado"])
+#         if selected_table:
+#             # Tabs para diferentes vistas
+#             tab1, tab2, tab3 = st.tabs(["📋 Estructura", "📊 Datos", "🔧 SQL Personalizado"])
             
-            with tab1:
-                # Mostrar estructura de la tabla
-                with st.spinner(f"Cargando estructura de {selected_table}..."):
-                    schema_df = get_table_schema(selected_table)
-                    if not schema_df.empty:
-                        st.dataframe(schema_df, use_container_width=True)
-                    else:
-                        st.error("No se pudo cargar la estructura")
+#             with tab1:
+#                 # Mostrar estructura de la tabla
+#                 with st.spinner(f"Cargando estructura de {selected_table}..."):
+#                     schema_df = get_table_schema(selected_table)
+#                     if not schema_df.empty:
+#                         st.dataframe(schema_df, use_container_width=True)
+#                     else:
+#                         st.error("No se pudo cargar la estructura")
             
-            with tab2:
-                # Muestra de datos
-                num_rows = st.number_input("Número de filas:", min_value=1, max_value=100, value=10)
-                if st.button("📥 Cargar Datos"):
-                    with st.spinner("Cargando datos..."):
-                        result = make_api_request("/run-sql", "POST", {
-                            "sql": f"SELECT * FROM {selected_table} LIMIT {num_rows}"
-                        })
-                        if result["success"] and result["data"].get("success"):
-                            df = pd.DataFrame(result["data"]["results"])
-                            st.dataframe(df, use_container_width=True)
+#             with tab2:
+#                 # Muestra de datos
+#                 num_rows = st.number_input("Número de filas:", min_value=1, max_value=100, value=10)
+#                 if st.button("📥 Cargar Datos"):
+#                     with st.spinner("Cargando datos..."):
+#                         result = make_api_request("/run-sql", "POST", {
+#                             "sql": f"SELECT * FROM {selected_table} LIMIT {num_rows}"
+#                         })
+#                         if result["success"] and result["data"].get("success"):
+#                             df = pd.DataFrame(result["data"]["results"])
+#                             st.dataframe(df, use_container_width=True)
                             
-                            # Descargar
-                            csv = df.to_csv(index=False)
-                            st.download_button(
-                                "📥 Descargar CSV",
-                                csv,
-                                f"{selected_table}_sample.csv",
-                                "text/csv"
-                            )
-                        else:
-                            st.error("Error al cargar datos")
+#                             # Descargar
+#                             csv = df.to_csv(index=False)
+#                             st.download_button(
+#                                 "📥 Descargar CSV",
+#                                 csv,
+#                                 f"{selected_table}_sample.csv",
+#                                 "text/csv"
+#                             )
+#                         else:
+#                             st.error("Error al cargar datos")
             
-            with tab3:
-                # SQL personalizado
-                st.markdown("**Escribe tu consulta SQL:**")
-                custom_sql = st.text_area(
-                    "SQL",
-                    value=f"SELECT * FROM {selected_table} WHERE ",
-                    height=150,
-                    key="custom_sql"
-                )
+#             with tab3:
+#                 # SQL personalizado
+#                 st.markdown("**Escribe tu consulta SQL:**")
+#                 custom_sql = st.text_area(
+#                     "SQL",
+#                     value=f"SELECT * FROM {selected_table} WHERE ",
+#                     height=150,
+#                     key="custom_sql"
+#                 )
                 
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    if st.button("▶️ Ejecutar", type="primary"):
-                        with st.spinner("Ejecutando..."):
-                            result = make_api_request("/run-sql", "POST", {"sql": custom_sql})
-                            if result["success"] and result["data"].get("success"):
-                                df = pd.DataFrame(result["data"]["results"])
-                                st.success(f"✅ {len(df)} filas")
-                                st.dataframe(df, use_container_width=True)
-                            else:
-                                st.error(f"Error: {result.get('error', 'Error desconocido')}")
-    else:
-        st.warning("No se encontraron tablas en la base de datos")
+#                 col1, col2 = st.columns([1, 4])
+#                 with col1:
+#                     if st.button("▶️ Ejecutar", type="primary"):
+#                         with st.spinner("Ejecutando..."):
+#                             result = make_api_request("/run-sql", "POST", {"sql": custom_sql})
+#                             if result["success"] and result["data"].get("success"):
+#                                 df = pd.DataFrame(result["data"]["results"])
+#                                 st.success(f"✅ {len(df)} filas")
+#                                 st.dataframe(df, use_container_width=True)
+#                             else:
+#                                 st.error(f"Error: {result.get('error', 'Error desconocido')}")
+#     else:
+#         st.warning("No se encontraron tablas en la base de datos")
 
 
-def training_interface():
-    """Interfaz para gestionar el entrenamiento"""
-    st.header("🎓 Gestión de Entrenamiento")
-    st.markdown("Entrena a Vanna con nuevos ejemplos para mejorar sus respuestas")
+# def training_interface():
+#     """Interfaz para gestionar el entrenamiento"""
+#     st.header("🎓 Gestión de Entrenamiento")
+#     st.markdown("Entrena a Vanna con nuevos ejemplos para mejorar sus respuestas")
     
-    # Tabs para diferentes tipos de entrenamiento
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Pregunta-SQL", "🏗️ DDL", "📚 Documentación", "🗂️ Ver Datos", "🚀 Auto-Entrenamiento"])
+#     # Tabs para diferentes tipos de entrenamiento
+#     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Pregunta-SQL", "🏗️ DDL", "📚 Documentación", "🗂️ Ver Datos", "🚀 Auto-Entrenamiento"])
     
-    with tab1:
-        st.subheader("Entrenar con pares Pregunta-SQL")
-        with st.form("train_sql_form"):
-            question = st.text_input("Pregunta en lenguaje natural:")
-            sql = st.text_area("Consulta SQL correspondiente:", height=100)
+#     with tab1:
+#         st.subheader("Entrenar con pares Pregunta-SQL")
+#         with st.form("train_sql_form"):
+#             question = st.text_input("Pregunta en lenguaje natural:")
+#             sql = st.text_area("Consulta SQL correspondiente:", height=100)
             
-            if st.form_submit_button("➕ Agregar Ejemplo", type="primary"):
-                if question and sql:
-                    result = make_api_request("/train", "POST", {
-                        "question": question,
-                        "sql": sql
-                    })
-                    if result["success"]:
-                        st.success(f"✅ Ejemplo agregado con ID: {result['data']['id']}")
-                        st.balloons()
-                    else:
-                        st.error("Error al agregar ejemplo")
-                else:
-                    st.warning("Por favor completa ambos campos")
+#             if st.form_submit_button("➕ Agregar Ejemplo", type="primary"):
+#                 if question and sql:
+#                     result = make_api_request("/train", "POST", {
+#                         "question": question,
+#                         "sql": sql
+#                     })
+#                     if result["success"]:
+#                         st.success(f"✅ Ejemplo agregado con ID: {result['data']['id']}")
+#                         st.balloons()
+#                     else:
+#                         st.error("Error al agregar ejemplo")
+#                 else:
+#                     st.warning("Por favor completa ambos campos")
     
-    with tab2:
-        st.subheader("Entrenar con DDL (Estructura de tablas)")
-        with st.form("train_ddl_form"):
-            ddl = st.text_area(
-                "DDL (CREATE TABLE statement):",
-                height=200,
-                placeholder="CREATE TABLE users (\n  id INT PRIMARY KEY,\n  name VARCHAR(100)\n);"
-            )
+#     with tab2:
+#         st.subheader("Entrenar con DDL (Estructura de tablas)")
+#         with st.form("train_ddl_form"):
+#             ddl = st.text_area(
+#                 "DDL (CREATE TABLE statement):",
+#                 height=200,
+#                 placeholder="CREATE TABLE users (\n  id INT PRIMARY KEY,\n  name VARCHAR(100)\n);"
+#             )
             
-            if st.form_submit_button("➕ Agregar DDL", type="primary"):
-                if ddl:
-                    result = make_api_request("/train", "POST", {"ddl": ddl})
-                    if result["success"]:
-                        st.success(f"✅ DDL agregado con ID: {result['data']['id']}")
-                    else:
-                        st.error("Error al agregar DDL")
-                else:
-                    st.warning("Por favor ingresa el DDL")
+#             if st.form_submit_button("➕ Agregar DDL", type="primary"):
+#                 if ddl:
+#                     result = make_api_request("/train", "POST", {"ddl": ddl})
+#                     if result["success"]:
+#                         st.success(f"✅ DDL agregado con ID: {result['data']['id']}")
+#                     else:
+#                         st.error("Error al agregar DDL")
+#                 else:
+#                     st.warning("Por favor ingresa el DDL")
     
-    with tab3:
-        st.subheader("Entrenar con Documentación")
-        with st.form("train_doc_form"):
-            documentation = st.text_area(
-                "Documentación o contexto de negocio:",
-                height=150,
-                placeholder="La tabla 'users' contiene información de usuarios. Los usuarios activos tienen status='active'..."
-            )
+#     with tab3:
+#         st.subheader("Entrenar con Documentación")
+#         with st.form("train_doc_form"):
+#             documentation = st.text_area(
+#                 "Documentación o contexto de negocio:",
+#                 height=150,
+#                 placeholder="La tabla 'users' contiene información de usuarios. Los usuarios activos tienen status='active'..."
+#             )
             
-            if st.form_submit_button("➕ Agregar Documentación", type="primary"):
-                if documentation:
-                    result = make_api_request("/train", "POST", {"documentation": documentation})
-                    if result["success"]:
-                        st.success(f"✅ Documentación agregada con ID: {result['data']['id']}")
-                    else:
-                        st.error("Error al agregar documentación")
-                else:
-                    st.warning("Por favor ingresa la documentación")
+#             if st.form_submit_button("➕ Agregar Documentación", type="primary"):
+#                 if documentation:
+#                     result = make_api_request("/train", "POST", {"documentation": documentation})
+#                     if result["success"]:
+#                         st.success(f"✅ Documentación agregada con ID: {result['data']['id']}")
+#                     else:
+#                         st.error("Error al agregar documentación")
+#                 else:
+#                     st.warning("Por favor ingresa la documentación")
     
-    with tab4:
-        st.subheader("Datos de Entrenamiento Actuales")
+#     with tab4:
+#         st.subheader("Datos de Entrenamiento Actuales")
         
-        # Botón para recargar
-        if st.button("🔄 Actualizar Lista"):
-            result = make_api_request("/training-data")
-            if result["success"]:
-                st.session_state.training_data = result["data"]["data"]
+#         # Botón para recargar
+#         if st.button("🔄 Actualizar Lista"):
+#             result = make_api_request("/training-data")
+#             if result["success"]:
+#                 st.session_state.training_data = result["data"]["data"]
         
-        if st.session_state.training_data:
-            # Mostrar estadísticas
-            df_training = pd.DataFrame(st.session_state.training_data)
+#         if st.session_state.training_data:
+#             # Mostrar estadísticas
+#             df_training = pd.DataFrame(st.session_state.training_data)
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                sql_count = len(df_training[df_training['type'] == 'sql'])
-                st.metric("Ejemplos SQL", sql_count)
-            with col2:
-                ddl_count = len(df_training[df_training['type'] == 'ddl'])
-                st.metric("DDLs", ddl_count)
-            with col3:
-                doc_count = len(df_training[df_training['type'] == 'documentation'])
-                st.metric("Documentación", doc_count)
+#             col1, col2, col3 = st.columns(3)
+#             with col1:
+#                 sql_count = len(df_training[df_training['type'] == 'sql'])
+#                 st.metric("Ejemplos SQL", sql_count)
+#             with col2:
+#                 ddl_count = len(df_training[df_training['type'] == 'ddl'])
+#                 st.metric("DDLs", ddl_count)
+#             with col3:
+#                 doc_count = len(df_training[df_training['type'] == 'documentation'])
+#                 st.metric("Documentación", doc_count)
             
-            # Mostrar datos
-            st.dataframe(df_training, use_container_width=True)
+#             # Mostrar datos
+#             st.dataframe(df_training, use_container_width=True)
             
-            # Opción de eliminar
-            if st.checkbox("Habilitar eliminación"):
-                item_to_delete = st.selectbox(
-                    "Selecciona elemento a eliminar:",
-                    df_training['id'].tolist()
-                )
-                if st.button("🗑️ Eliminar", type="secondary"):
-                    result = make_api_request(f"/training-data/{item_to_delete}", "DELETE")
-                    if result["success"]:
-                        st.success("✅ Elemento eliminado")
-                        st.rerun()
-                    else:
-                        st.error("Error al eliminar")
-        else:
-            st.info("No hay datos de entrenamiento. Usa las pestañas anteriores para agregar.")
+#             # Opción de eliminar
+#             if st.checkbox("Habilitar eliminación"):
+#                 item_to_delete = st.selectbox(
+#                     "Selecciona elemento a eliminar:",
+#                     df_training['id'].tolist()
+#                 )
+#                 if st.button("🗑️ Eliminar", type="secondary"):
+#                     result = make_api_request(f"/training-data/{item_to_delete}", "DELETE")
+#                     if result["success"]:
+#                         st.success("✅ Elemento eliminado")
+#                         st.rerun()
+#                     else:
+#                         st.error("Error al eliminar")
+#         else:
+#             st.info("No hay datos de entrenamiento. Usa las pestañas anteriores para agregar.")
     
-    with tab5:
-        st.subheader("🚀 Entrenamiento Automático")
-        st.markdown("Entrena automáticamente con todas las estructuras de tablas de tu base de datos")
+#     # with tab5:
+#     #     st.subheader("🚀 Entrenamiento Automático")
+#     #     st.markdown("Entrena automáticamente con todas las estructuras de tablas de tu base de datos")
         
-        # Información
-        st.info("""
-        Esta función:
-        - Detecta todas las tablas en tu base de datos
-        - Extrae el DDL (CREATE TABLE) de cada una
-        - Entrena a Vanna con estas estructuras
+#     #     # Información
+#     #     st.info("""
+#     #     Esta función:
+#     #     - Detecta todas las tablas en tu base de datos
+#     #     - Extrae el DDL (CREATE TABLE) de cada una
+#     #     - Entrena a Vanna con estas estructuras
         
-        ⚠️ Puede tomar tiempo si tienes muchas tablas
-        """)
+#     #     ⚠️ Puede tomar tiempo si tienes muchas tablas
+#     #     """)
         
-        col1, col2 = st.columns(2)
+#     #     col1, col2 = st.columns(2)
         
-        with col1:
-            if st.button("🎯 Iniciar Entrenamiento Automático", type="primary", use_container_width=True):
-                with st.spinner("Entrenando con DDLs de todas las tablas..."):
-                    result = make_api_request("/train/auto-ddl", "POST", {})
+#         with col1:
+#             if st.button("🎯 Iniciar Entrenamiento Automático", type="primary", use_container_width=True):
+#                 with st.spinner("Entrenando con DDLs de todas las tablas..."):
+#                     result = make_api_request("/train/auto-ddl", "POST", {})
                     
-                    if result["success"] and result["data"]["success"]:
-                        st.success(f"""
-                        ✅ Entrenamiento completado!
-                        - Tablas entrenadas: {result['data']['trained_tables']}
-                        - Total de tablas: {result['data']['total_tables']}
-                        """)
+#                     if result["success"] and result["data"]["success"]:
+#                         st.success(f"""
+#                         ✅ Entrenamiento completado!
+#                         - Tablas entrenadas: {result['data']['trained_tables']}
+#                         - Total de tablas: {result['data']['total_tables']}
+#                         """)
                         
-                        if result['data'].get('errors'):
-                            st.warning(f"Hubo {len(result['data']['errors'])} errores durante el proceso")
-                            with st.expander("Ver errores"):
-                                for error in result['data']['errors']:
-                                    st.text(f"❌ {error['table']}: {error['error']}")
+#                         if result['data'].get('errors'):
+#                             st.warning(f"Hubo {len(result['data']['errors'])} errores durante el proceso")
+#                             with st.expander("Ver errores"):
+#                                 for error in result['data']['errors']:
+#                                     st.text(f"❌ {error['table']}: {error['error']}")
                         
-                        st.balloons()
-                    else:
-                        st.error("Error durante el entrenamiento automático")
+#                         st.balloons()
+#                     else:
+#                         st.error("Error durante el entrenamiento automático")
         
-        with col2:
-            # Botón para ver las tablas disponibles
-            if st.button("📋 Ver Tablas Disponibles", use_container_width=True):
-                result = make_api_request("/tables")
-                if result["success"]:
-                    tables = result["data"]["tables"]
-                    st.write(f"**{len(tables)} tablas encontradas:**")
+#         with col2:
+#             # Botón para ver las tablas disponibles
+#             if st.button("📋 Ver Tablas Disponibles", use_container_width=True):
+#                 result = make_api_request("/tables")
+#                 if result["success"]:
+#                     tables = result["data"]["tables"]
+#                     st.write(f"**{len(tables)} tablas encontradas:**")
                     
-                    # Mostrar en columnas para mejor visualización
-                    cols = st.columns(3)
-                    for i, table in enumerate(tables):
-                        cols[i % 3].write(f"• {table}")
-                else:
-                    st.error("Error obteniendo lista de tablas")
+#                     # Mostrar en columnas para mejor visualización
+#                     cols = st.columns(3)
+#                     for i, table in enumerate(tables):
+#                         cols[i % 3].write(f"• {table}")
+#                 else:
+#                     st.error("Error obteniendo lista de tablas")
 
 
 # ============= APLICACIÓN PRINCIPAL =============
@@ -513,8 +485,8 @@ def main():
     initialize_session_state()
     
     # Título principal
-    st.title("🤖 Vanna AI - Consultas SQL Inteligentes")
-    st.markdown("Convierte preguntas en lenguaje natural a consultas SQL precisas")
+    st.title("Tramites Digitales")
+    # st.markdown("Convierte preguntas en lenguaje natural a consultas SQL precisas")
     
     # Sidebar
     sidebar()
@@ -524,16 +496,18 @@ def main():
         check_system_status()
     
     # Tabs principales
-    tab1, tab2, tab3 = st.tabs(["💬 Chat", "🔍 Explorador", "🎓 Entrenamiento"])
+    # tab1, tab2, tab3 = st.tabs(["💬 Chat", "🔍 Explorador", "🎓 Entrenamiento"])
+
+    tab1, = st.tabs(["💬 Chat"])
     
     with tab1:
         chat_interface()
     
-    with tab2:
-        data_explorer()
+    # with tab2:
+        # data_explorer()j
     
-    with tab3:
-        training_interface()
+    # with tab3:
+    #     training_interface()
     
     # Input de chat (siempre visible en la parte inferior)
     question = st.chat_input("Escribe tu pregunta aquí...")
