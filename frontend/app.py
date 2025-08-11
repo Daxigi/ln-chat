@@ -5,6 +5,11 @@ import json
 from typing import Dict, Any, List, Optional
 import time
 import uuid
+import os
+from dotenv import load_dotenv
+
+# Configuración
+load_dotenv()
 
 # Configuración de la página
 st.set_page_config(
@@ -15,7 +20,7 @@ st.set_page_config(
 )
 
 # Configuración de la API
-API_BASE_URL = "http://localhost:8000/api"
+API_BASE_URL = os.getenv("STREAMLIT_API_BASE_URL", "http://172.25.50.50:8000")
 
 # Estilos CSS personalizados
 st.markdown("""
