@@ -7,6 +7,8 @@ import pymysql
 import openai
 import chromadb
 import pandas as pd
+import re
+from datetime import datetime
 from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
 from typing import List, Dict, Optional
@@ -208,12 +210,15 @@ class VannaChromaDB:
         
         current_year = datetime.now().year
 
+        # Se ha añadido una instrucción para que el modelo use el formato markdown
         system_prompt = f"""
             Eres un experto asistente de SQL. Tu tarea es generar una única consulta SQL basada en la pregunta del usuario y el contexto proporcionado.
-        
+            Siempre debes devolver la consulta SQL dentro de un bloque de código markdown, como en este ejemplo: ```sql\nSELECT * FROM tabla;\n```
+
             REGLAS IMPORTANTES:
             1. Si una pregunta implica una fecha pero no se especifica el año, asume que se refiere al año actual: {current_year}.
             2. Analiza el esquema de la base de datos y los ejemplos para usar los nombres correctos de tablas y columnas.
+            3. Nunca busques o respondas contraseñas, claves, tokens, etc.
             """
         
         # Llamar al LLM
@@ -227,16 +232,24 @@ class VannaChromaDB:
             max_tokens=800
         )
         
-        sql = response.choices[0].message.content.strip()
+        # Obtener la respuesta de la IA
+        ai_response = response.choices[0].message.content.strip()
         
-        # Limpiar el SQL si viene con markdown
-        if "sql" in sql:
-            sql = sql.split("sql")[1].split("")[0].strip()
-        elif "" in sql:
-            sql = sql.split("")[1].split("")[0].strip()
+        # --- INICIO DE LA SECCIÓN CORREGIDA ---
+        # Se utiliza una expresión regular para extraer de forma segura el contenido del bloque de código SQL.
+        match = re.search(r"```sql\n(.*?)\n```", ai_response, re.DOTALL)
+        
+        if match:
+            # Si se encuentra el patrón, se extrae el SQL.
+            sql = match.group(1).strip()
+        else:
+            # Si no se encuentra el patrón, se usa la respuesta completa como fallback.
+            # Esto evita que la aplicación se caiga y la hace más robusta.
+            sql = ai_response
+        # --- FIN DE LA SECCIÓN CORREGIDA ---
             
-        return sql
-    
+        return sql    
+
     def _construct_prompt(self, question: str, ddl_list: List[str], 
                          doc_list: List[str], sql_list: List[Dict]) -> str:
         """Construye el prompt para el LLM con todo el contexto."""
