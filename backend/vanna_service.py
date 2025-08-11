@@ -218,7 +218,7 @@ class VannaChromaDB:
             REGLAS IMPORTANTES:
             1. Si una pregunta implica una fecha pero no se especifica el año, asume que se refiere al año actual: {current_year}.
             2. Analiza el esquema de la base de datos y los ejemplos para usar los nombres correctos de tablas y columnas.
-            3. Nunca busques o respondas contraseñas, claves, tokens, etc.
+            3. Nunca busques o respondas contraseñas, claves(EXCEPTO DNI, CORREOS o IDS).
             """
         
         # Llamar al LLM
