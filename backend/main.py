@@ -9,6 +9,8 @@ from datetime import datetime
 import uvicorn
 import logging
 import os
+import json
+import numpy as np
 
 # Configuración
 load_dotenv()
