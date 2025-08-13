@@ -3,10 +3,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
-import logging
 from vanna_service import VannaChromaDB
 from dotenv import load_dotenv
+from datetime import datetime
 import uvicorn
+import logging
+import os
 
 # Configuración
 load_dotenv()
@@ -56,6 +58,10 @@ class TrainRequest(BaseModel):
 
 class SQLRequest(BaseModel):
     sql: str
+
+class RestoreRequest(BaseModel):
+    filename: str
+    clear_before_restore: bool = True
 
 # ===== Limpiamos posibles inf o nan =====
 
@@ -220,6 +226,68 @@ async def train(request: TrainRequest):
             "error": str(e)
         }
 
+@app.post("/api/training-data/restore")
+async def restore_from_backup(request: RestoreRequest):
+    """
+    Restaura el entrenamiento desde un archivo de backup JSON ESPECÍFICO.
+    """
+    backup_dir = "./backups"
+    
+    try:
+        # --- LÓGICA SIMPLIFICADA ---
+        # Ahora siempre usa el filename que viene en la solicitud.
+        file_path = os.path.join(backup_dir, request.filename)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"Archivo de backup no encontrado: {request.filename}")
+
+        logger.info(f"Iniciando restauración desde: {file_path}")
+
+        # (Opcional) Limpiar el entrenamiento existente
+        if request.clear_before_restore:
+            logger.info("Limpiando datos de entrenamiento existentes...")
+            training_data = vn.get_training_data()
+            if not training_data.empty:
+                ids_to_remove = training_data['id'].tolist()
+                for doc_id in ids_to_remove:
+                    vn.remove_training_data(id=doc_id)
+            logger.info("Datos existentes eliminados.")
+
+        # Leer el archivo de backup y re-entrenar
+        with open(file_path, 'r', encoding='utf-8') as f:
+            backup_data = json.load(f)
+
+        success_count = 0
+        error_count = 0
+        for record in backup_data:
+            try:
+                if record['type'] == 'sql':
+                    vn.train(question=record['question'], sql=record['content'])
+                elif record['type'] == 'ddl':
+                    vn.train(ddl=record['content'])
+                elif record['type'] == 'documentation':
+                    vn.train(documentation=record['content'])
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Error restaurando registro {record.get('id')}: {e}")
+                error_count += 1
+
+        summary = f"Restauración completada. Exitosos: {success_count}, Errores: {error_count}."
+        logger.info(summary)
+        
+        return {
+            "success": True,
+            "message": summary,
+            "restored_from": file_path
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en el proceso de restauración: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": str(e)}
+        )
 
 @app.get("/api/training-data")
 async def get_training_data():
@@ -240,6 +308,46 @@ async def get_training_data():
             "success": False,
             "error": str(e)
         }
+
+@app.post("/api/training-data/backup")
+async def backup_training_data():
+    """
+    Crea un backup de todos los datos de entrenamiento en un archivo JSON.
+    """
+    try:
+        # 1. Definir la carpeta de backups
+        backup_dir = "./backups"
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+            logger.info(f"Creado directorio de backups en: {backup_dir}")
+
+        # 2. Obtener todos los datos de entrenamiento
+        logger.info("Obteniendo datos de entrenamiento para el backup...")
+        df = vn.get_training_data()
+        data = df.to_dict('records')
+        
+        # 3. Crear el archivo de backup con fecha y hora
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = os.path.join(backup_dir, f"vanna_backup_{timestamp}.json")
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        
+        logger.info(f"✅ Backup creado exitosamente en: {file_path}")
+        
+        return {
+            "success": True,
+            "message": "Backup creado exitosamente.",
+            "file_path": file_path,
+            "record_count": len(data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creando el backup: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": str(e)}
+        )
 
 
 @app.delete("/api/training-data/{id}")
