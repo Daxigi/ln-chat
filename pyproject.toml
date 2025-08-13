@@ -1,17 +1,29 @@
+# --- Nuevo estándar para información del proyecto ---
 [project]
 name = "ln-chat"
 version = "0.1.0"
-description = ""
-authors = [
-    {name = "Daxigi",email = "maximilianogimenez91@gmail.com"}
-]
+description = "Aplicación con backend FastAPI/Vanna y frontend Streamlit."
+authors = [{ name = "Daxigi", email = "maximilianogimenez91@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "plotly (>=6.2.0,<7.0.0)"
+    "fastapi>=0.111.0,<0.112.0",
+    "uvicorn[standard]>=0.29.0,<0.30.0",
+    "vanna>=0.7.9,<0.8.0",
+    "mysql-connector-python>=9.4.0,<10.0.0",
+    "python-dotenv>=1.0.1,<2.0.0",
+    "cryptography>=42.0.7,<43.0.0",
+    "streamlit>=1.35.0,<2.0.0",
 ]
 
+# --- Configuración específica de Poetry ---
+[tool.poetry]
+packages = [
+    { include = "backend" },
+    { include = "frontend" },
+]
 
+# --- Herramientas de construcción ---
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core>=2.0.0"]
 build-backend = "poetry.core.masonry.api"
