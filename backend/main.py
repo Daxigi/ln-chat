@@ -57,6 +57,22 @@ class TrainRequest(BaseModel):
 class SQLRequest(BaseModel):
     sql: str
 
+# ===== Limpiamos posibles inf o nan =====
+
+def clean_non_json_values(data):
+    """
+    Recorre un diccionario o lista y reemplaza NaN, inf, -inf por None.
+    """
+
+    if isinstance(data, dict):
+        return {k:clean_non_json_values(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [vlean_non_json_values(i) for i in data]
+    if isinstance(data, float) and (np.isnan(data) or np.isinf(data)):
+        return None
+    return data
+
+
 
 # ===== EVENTOS DE INICIO =====
 
@@ -120,6 +136,7 @@ async def generate_sql(request: QuestionRequest):
 @app.post("/api/ask")
 async def ask(request: QuestionRequest):
     """Genera SQL y ejecuta la consulta, retornando los resultados."""
+    sql = None # Definir sql aquí para que esté disponible en el bloque except
     try:
         question = request.question.strip()
         
@@ -135,11 +152,15 @@ async def ask(request: QuestionRequest):
         # Convertir DataFrame a JSON
         if df is not None:
             results = df.to_dict('records')
+            
+            # Limpia los resultados para que sean compatibles con JSON
+            cleaned_results = clean_non_json_values(results)
+            
             return {
                 "success": True,
                 "question": question,
                 "sql": sql,
-                "results": results,
+                "results": cleaned_results, # Usar los resultados limpios
                 "row_count": len(df)
             }
         else:
@@ -157,7 +178,6 @@ async def ask(request: QuestionRequest):
             "error": str(e),
             "sql": sql
         }
-
 
 @app.post("/api/train")
 async def train(request: TrainRequest):
