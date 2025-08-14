@@ -12,6 +12,7 @@ services:
       - "8000:8000"
     volumes:
       - chroma_data:/data/chroma
+      - ./vps_backups:/app/backend/backups
     networks: [vanna_net]
     restart: unless-stopped
 
