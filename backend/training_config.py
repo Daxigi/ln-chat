@@ -26,58 +26,34 @@ SELECTED_TABLES = [
 
 # Documentación de negocio
 DOCUMENTATION = [
-    "USERS: La tabla 'users' contiene la información de todos los usuarios registrados en el sistema.",
-    "Los usuarios con el campo 'deleted_at' en NULL son considerados usuarios activos.",
-    "REQUESTS: La tabla 'requests' almacena todas las solicitudes de trámites iniciadas por los usuarios.",
-    "PROCEDURES: La tabla 'procedures' es el catálogo de los tipos de trámites que se pueden solicitar.",
-    "Los trámites con 'procedure_status_id' = 1 son trámites activos que los usuarios pueden iniciar.",
-    "REQUEST_STATES: La tabla 'request_states' describe los posibles estados de una solicitud (ej: 'Iniciado', 'En proceso', 'Finalizado').",
-    "REQUEST_STATE_RECORDS: La tabla 'request_state_records' guarda el historial de cambios de estado para cada solicitud.",
-    "El estado actual de una solicitud se determina por su registro más reciente en la tabla 'request_state_records'.",
-    "Siempre que se hable de solicitudes, se deben excluir aquellas cuyo campo 'deleted_at' no sea NULL.",
-    "El campo 'current_role' de un usuario solo representa el rol activo mientras está logueado en la página. Un usuario puede tener múltiples roles asociados a través de la tabla intermedia 'model_has_roles'.",
-    "Relaciones: 'users.id' → 'requests.user_id', 'procedures.id' → 'requests.procedure_id', 'request_states.id' → 'request_state_records.request_state_id', 'requests.id' → 'request_state_records.request_id'.",
-    "Una 'solicitud con último estado borrador' es aquella cuyo registro más reciente en 'request_state_records' tenga 'request_state_id' correspondiente a 'borrador'.",
-    "Para obtener las solicitudes que hizo un usuario en un periodo, se debe filtrar por 'users.dni' y 'requests.created_at' dentro del rango de fechas especificado.",
-    "Las solicitudes con 'deleted_at' distinto de NULL deben ser excluidas de todos los conteos y listados.",
-    "Al contar solicitudes por estado, se debe considerar el último estado registrado para cada solicitud, no todos los históricos.",
-    "Si se solicita 'todas las solicitudes que hizo un DNI en un periodo', se debe hacer join entre 'users', 'requests' y 'procedures', filtrando por 'users.dni' y rango de fechas en 'requests.created_at'.",
+    "FACT: ROLES => 1=Administrador, 2=Editor, 3=Visualizador, 4=Agente, 5=Vecino Nivel 1, 6=Vecino Nivel 2, 7=Vecino Nivel 3, 8=Vecino Nivel 4, 9=Supervisor, 16=Tractas, 17=Obras.",
+    "FACT: REQUEST_STATES (CANONICO) => 1=Borrador, 2=Publicado, 3=En proceso, 4=Finalizado, 5=Rechazado, 6=Revocado (usar estos nombres exactamente).",
+    "FACT: MODEL_HAS_ROLES => tabla polimórfica; para usuarios unir por mhr.model_id = users.id Y mhr.model_type='App\\\\Models\\\\User'.",
+    "FACT: REQUEST_STATE_RECORDS => historial de estados por solicitud; estado actual = registro con mayor fecha (MAX(date)) o ROW_NUMBER() rn=1 (ORDER BY date DESC) | ANCHOR: USE_ROW_NUMBER_RN_1.",
+    "FACT: REQUEST_STATES_DESC => catálogo textual de estados; usar 'Borrador','Publicado','En proceso','Finalizado','Rechazado','Revocado'.",
+    "FACT: PROCEDURES => los trámites activos tienen procedure_status_id=1 (relevantes por defecto).",
+    "FACT: PROCEDURES_DESC => catálogo de tipos de trámites (p.name).",
+    "FACT: REQUESTS => almacena todas las solicitudes de trámites; requests.deleted_at IS NULL = no eliminada (no confundir con estado).",
+    "FACT: USERS => users.current_role = rol activo en sesión; para todos los roles usar model_has_roles.",
+    "FACT: USERS_ACTIVE => users.deleted_at IS NULL = usuario activo.",
+    "FACT: USERS_DESC => información de usuarios; DNI = users.dni.",
+    "RULE: SOFT_DELETE (STRICT: ALWAYS | ANCHOR: SOFT_DELETE) => en TODA consulta a requests incluir SIEMPRE r.deleted_at IS NULL (si no hay alias: requests.deleted_at IS NULL).",
+    "RULE: NO_NAMED_PARAMS (STRICT: ALWAYS) => la SQL generada NO debe usar placeholders con dos puntos (:start_date/:end_next); usar literales o el placeholder correcto del driver (%s, ?).",
+    "RULE: RANGE_SEMIABIERTO (ANCHOR: RANGE_SEMIABIERTO) => filtrar fechas con r.col >= '[INICIO] 00:00:00' Y r.col < '[FIN+1] 00:00:00'; evitar MONTH()/YEAR(col) para preservar índices.",
+    "RULE: NUMBER_IS_DNI (STRICT: ALWAYS) => si la pregunta incluye un número y no dice 'expediente/reference/id', interpretarlo como users.dni; NO usar r.user_id ni r.reference_number.",
+    "RULE: REQUIRE_USERS_JOIN (STRICT: ALWAYS) => si se filtra por DNI, unir SIEMPRE users u (r.user_id=u.id) y filtrar por u.dni='[DNI]'.",
+    "RULE: REQUIRE_PROCEDURE_FILTER (STRICT: ALWAYS) => si la pregunta menciona un trámite, filtrar SIEMPRE por procedures.name (= o LIKE).",
+    "RULE: FECHAS_RELATIVAS => normalizar 'hoy/ayer/últimos N días/mes pasado...' a fechas absolutas (TZ America/Argentina/Cordoba) antes de generar SQL; exponer [INICIO] y [FIN+1].",
+    "INTENT: SOLICITUDES_POR_TRAMITE_RANGO | ANCHOR: SOFT_DELETE RANGE_SEMIABIERTO | STRICT: ALWAYS => contar requests por p.name (= o LIKE) con r.start_date en rango semiabierto; incluir SIEMPRE r.deleted_at IS NULL; agrupar por p.name; ordenar por cantidad DESC.",
+    "INTENT: ESTADO_FINAL_POR_TRAMITE | ANCHOR: USE_ROW_NUMBER_RN_1 SOFT_DELETE | STRICT: ALWAYS => usar SOLO último estado por request (ROW_NUMBER PARTITION BY r.id ORDER BY rsr.date DESC; rn=1), filtrar periodo por r.created_at, excluir r.deleted_at IS NULL, agrupar por p.name y rs.description; NO usar rsr.deleted_at ni rsr.procedure_id.",
+    "INTENT: ULTIMO_ESTADO_ULTIMA_SOLICITUD | ANCHOR: USE_SUBQUERY_LAST_REQUEST USE_ROW_NUMBER_RN_1 SOFT_DELETE | STRICT: ALWAYS => dado un DNI y un trámite (= o LIKE), unir r–u–p; filtrar por u.dni y p.name; excluir r.deleted_at IS NULL; elegir SOLO la última solicitud (ORDER BY r.created_at DESC LIMIT 1) y devolver el ÚLTIMO estado (rn=1 o MAX(date)).",
+    "INTENT: BACKLOG_ABIERTAS | ANCHOR: SOFT_DELETE | STRICT: ALWAYS => contar requests con finish_date IS NULL y r.start_date en rango (semiabierto); incluir r.deleted_at IS NULL; opcionalmente r.start_date <= (fecha_actual - (days+1)).",
+    "INTENT: TRAMITES_ATENDIDOS_POR_AGENTE | ANCHOR: AGENT_RSR | STRICT: PREFER => contar en request_state_records rsr donde rsr.user_id = users.id del AGENTE (por DNI); unir a requests r y procedures p para nombres de trámite; aplicar reglas de fechas y SOFT_DELETE en requests si corresponde.",
+    "VOCAB: sinonimos => 'solicitudes/tickets/casos'→requests; 'trámite'→procedures.name; 'estado'→request_states.description; 'dni/documento'→users.dni; 'expediente/nro solicitud/reference'→requests.reference_number; 'última'→ORDER BY r.created_at DESC LIMIT 1; 'estado actual'→ROW_NUMBER rn=1 por fecha en request_state_records."
 ]
 
 # Ejemplos de preguntas y SQL
 SQL_EXAMPLES = [
-    {
-        "question": "¿Cuántos usuarios hay?",
-        "sql": "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL;"
-    },
-    {
-        "question": "¿Cuántos usuarios nuevos se registraron entre dos fechas específicas (ej: 01/01/2024 y 31/01/2024)?",
-        "sql": "SELECT COUNT(*) AS total_usuarios_nuevos FROM users WHERE created_at BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59';"
-    },
-    {
-        "question": "¿Qué usuarios tienen el rol de 'Agente'?",
-        "sql": "SELECT u.name, u.dni FROM users u JOIN model_has_roles mhr ON u.id = mhr.model_id WHERE mhr.role_id = 4;"
-    },
-    {
-        "question": "¿Cuántos cambios de estado realizó en total el agente con DNI 12345678?",
-        "sql": "SELECT COUNT(*) FROM request_state_records rsr JOIN users u ON rsr.user_id = u.id WHERE u.dni = '12345678';"
-    },
-    {
-        "question": "¿Cuántas veces el agente con ID 5 cambió un estado a 'Finalizado' (ID 4)?",
-        "sql": "SELECT COUNT(*) FROM request_state_records WHERE user_id = 5 AND request_status_id = 4;"
-    },
-    {
-        "question": "cuantas solicitudes se crearon hoy?",
-        "sql": "SELECT COUNT(*) FROM requests WHERE DATE(created_at) = CURDATE();"
-    },
-    {
-        "question": "Cuantas solicitudes hay actualmente en cada estado?",
-        "sql" : "WITH ultimo_estado AS ( SELECT request_status_id, ROW_NUMBER() OVER (PARTITION BY request_id ORDER BY date DESC) AS rn FROM request_state_records ) SELECT rs.description, COUNT(*) AS total FROM ultimo_estado ue JOIN request_states rs ON ue.request_status_id = rs.id WHERE ue.rn = 1 GROUP BY rs.description;"
-    },
-    {
-        "question": "Cuantas solicitudes estan en estado En Proceso?",
-        "sql": "WITH ultimo_estado AS (SELECT request_status_id, ROW_NUMBER() OVER (PARTITION BY request_id ORDER BY date DESC) AS rn FROM request_state_records ) SELECT COUNT(*) FROM ultimo_estado WHERE rn = 1 AND request_status_id = 3;"
-    },
 ]
 
 
