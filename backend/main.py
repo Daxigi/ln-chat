@@ -354,53 +354,6 @@ async def backup_training_data():
             detail={"success": False, "error": str(e)}
         )
 
-@app.delete("/api/training-data/clear-all")
-async def clear_all_training_data(request: ClearRequest):
-    """
-    Elimina TODOS los datos de entrenamiento (DDL, Documentación y SQL).
-    Requiere una confirmación explícita para proceder.
-    """
-    # 1. Medida de seguridad: Verificar el texto de confirmación
-    required_confirmation_text = "BORRAR TODO"
-    if request.confirmation != required_confirmation_text:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Confirmación incorrecta. Debes enviar exactamente el texto '{required_confirmation_text}'."
-        )
-        
-    try:
-        # 2. Obtener todos los IDs de los datos de entrenamiento existentes
-        logger.info("Iniciando borrado de todos los datos de entrenamiento...")
-        training_data = vn.get_training_data()
-        
-        if training_data.empty:
-            logger.info("No hay datos de entrenamiento para borrar.")
-            return {"success": True, "message": "No había datos de entrenamiento para borrar.", "deleted_count": 0}
-
-        ids_to_remove = training_data['id'].tolist()
-        
-        # 3. Borrar cada registro uno por uno
-        deleted_count = 0
-        for doc_id in ids_to_remove:
-            if vn.remove_training_data(id=doc_id):
-                deleted_count += 1
-        
-        summary = f"Borrado completado. Se eliminaron {deleted_count} registros."
-        logger.info(summary)
-        
-        return {
-            "success": True,
-            "message": summary,
-            "deleted_count": deleted_count
-        }
-
-    except Exception as e:
-        logger.error(f"Error durante el borrado masivo: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail={"success": False, "error": str(e)}
-        )
-
 
 @app.delete("/api/training-data/{id}")
 async def remove_training_data(id: str):
@@ -501,6 +454,52 @@ async def get_table_schema(table_name: str):
             "error": str(e)
         }
 
+@app.delete("/api/training-data/clear-all")
+async def clear_all_training_data(request: ClearRequest):
+    """
+    Elimina TODOS los datos de entrenamiento (DDL, Documentación y SQL).
+    Requiere una confirmación explícita para proceder.
+    """
+    # 1. Medida de seguridad: Verificar el texto de confirmación
+    required_confirmation_text = "BORRAR TODO"
+    if request.confirmation != required_confirmation_text:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Confirmación incorrecta. Debes enviar exactamente el texto '{required_confirmation_text}'."
+        )
+        
+    try:
+        # 2. Obtener todos los IDs de los datos de entrenamiento existentes
+        logger.info("Iniciando borrado de todos los datos de entrenamiento...")
+        training_data = vn.get_training_data()
+        
+        if training_data.empty:
+            logger.info("No hay datos de entrenamiento para borrar.")
+            return {"success": True, "message": "No había datos de entrenamiento para borrar.", "deleted_count": 0}
+
+        ids_to_remove = training_data['id'].tolist()
+        
+        # 3. Borrar cada registro uno por uno
+        deleted_count = 0
+        for doc_id in ids_to_remove:
+            if vn.remove_training_data(id=doc_id):
+                deleted_count += 1
+        
+        summary = f"Borrado completado. Se eliminaron {deleted_count} registros."
+        logger.info(summary)
+        
+        return {
+            "success": True,
+            "message": summary,
+            "deleted_count": deleted_count
+        }
+
+    except Exception as e:
+        logger.error(f"Error durante el borrado masivo: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": str(e)}
+        )
 
 
 @app.post("/api/train/auto-ddl")
