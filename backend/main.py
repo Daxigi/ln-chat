@@ -155,7 +155,9 @@ async def ask(request: QuestionRequest):
             raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía")
         
         # Generar SQL
-        sql = vn.generate_sql(question)
+        generation_result = vn.generate_sql(question)
+        sql = generation_result["sql"]
+        context = generation_result["context"]
         
         # Ejecutar SQL
         df = vn.run_sql(sql)
@@ -171,6 +173,7 @@ async def ask(request: QuestionRequest):
                 "success": True,
                 "question": question,
                 "sql": sql,
+                "context": context,
                 "results": cleaned_results, # Usar los resultados limpios
                 "row_count": len(df)
             }
@@ -179,6 +182,7 @@ async def ask(request: QuestionRequest):
                 "success": False,
                 "question": question,
                 "sql": sql,
+                "context": context,
                 "error": "Error ejecutando la consulta"
             }
             

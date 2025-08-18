@@ -248,9 +248,15 @@ class VannaChromaDB:
             # Si no se encuentra el patrón, se usa la respuesta completa como fallback.
             # Esto evita que la aplicación se caiga y la hace más robusta.
             sql = ai_response
-        # --- FIN DE LA SECCIÓN CORREGIDA ---
+
+        context = {
+            "retrieved_ddl":  ddl_list,
+            "retrieved_documentation": doc_list,
+            "retrieved_sql_examples": sql_list
+        }
+
             
-        return sql    
+        return {"sql": sql, "context": context}    
 
     def _construct_prompt(self, question: str, ddl_list: List[str], 
                          doc_list: List[str], sql_list: List[Dict]) -> str:
