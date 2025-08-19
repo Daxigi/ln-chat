@@ -16,7 +16,8 @@ dependencies = [
     "streamlit>=1.35.0,<2.0.0",
     "pymysql>=1.1.1,<2.0.0",
     "openai>=1.35.3,<2.0.0",
-    "chromadb (>=0.4.24,<0.5.0)"
+    "chromadb>=0.4.24,<0.5.0",
+    "numpy<2.0",
 ]
 
 # --- Configuración específica de Poetry ---
