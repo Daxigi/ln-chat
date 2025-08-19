@@ -1,19 +1,22 @@
+# 1. Imagen base
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
-
+# 2. Directorio de trabajo principal
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl && rm -rf /var/lib/apt/lists/*
+# 3. Instalar dependencias
+COPY ./frontend/requirements.txt /app/
+RUN pip install -r requirements.txt
 
-COPY requirements.txt .
-RUN python -m pip install --upgrade pip && pip install -r requirements.txt
+# 4. Copiar el código del frontend
+COPY ./frontend /app/frontend
 
-COPY . /app/
+# --- CAMBIO IMPORTANTE AQUÍ ---
+# 5. Entra al directorio donde está tu app.py
+WORKDIR /app/frontend
 
+# 6. Expone el puerto de Streamlit
 EXPOSE 8501
 
-CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+# 7. Ejecuta la aplicación
+CMD ["streamlit", "run", "app.py"]
