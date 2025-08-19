@@ -1,30 +1,29 @@
-# 1. Usa una imagen base de Python
+# 1. Imagen base (asegúrate que coincida con tu pyproject.toml)
 FROM python:3.12-slim
 
-# 2. Establece el directorio de trabajo dentro del contenedor
-WORKDIR /app
-
-# 3. Instala herramientas de compilación (g++, etc.) para dependencias como ChromaDB
+# 2. Instala herramientas de compilación
 RUN apt-get update && apt-get install -y build-essential
 
-# 4. Instala Poetry en el sistema
+# 3. Directorio de trabajo principal
+WORKDIR /app
+
+# 4. Instala Poetry
 RUN pip install poetry
 
-# 5. Copia solo los archivos de configuración de dependencias
+# 5. Copia archivos de dependencias
 COPY pyproject.toml poetry.lock* /app/
 
-# 6. Instala las dependencias del proyecto usando Poetry
-RUN poetry config virtualenvs.create false && poetry install --no-root --no-interaction --no-ansi
+# 6. Instala dependencias
+RUN poetry config virtualenvs.create false && poetry install --no-root
 
-# 7. Copia el resto del código de tu aplicación
+# 7. Copia tu código
 COPY ./backend /app/backend
-COPY ./frontend /app/frontend
 
-# 8. Entra al directorio de tu aplicación
+# 8. CAMBIO IMPORTANTE: Establece el directorio de trabajo final
 WORKDIR /app/backend
 
-# 9. Expone el puerto que tu API usa
+# 9. Expone el puerto
 EXPOSE 8000
 
-# 10. Comando para correr la aplicación
+# 10. CAMBIO IMPORTANTE: Comando de inicio simplificado
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
