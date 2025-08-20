@@ -266,6 +266,7 @@ class VannaChromaDB:
             3. Nunca busques o respondas contraseñas, claves(EXCEPTO DNI, CORREOS o IDS).
             4. Siempre normalizar fechas relativas a absolutas usando TZ "America/Argentina/Cordoba"; usar rango semiabierto [start_date, end_next) o cerrado con '00:00:00' y '23:59:59'; exponer parámetros :start_date y :end_date (o :end_next); evitar funciones MONTH/YEAR en columnas para no romper índices.
             5. En TODA consulta que cuente solicitudes, excluir eliminadas lógicamente con r.deleted_at IS NULL
+            5. **NUNCA uses marcadores de posición con dos puntos (como :dni o :start_date). Siempre debes reemplazar cualquier valor necesario (DNI, fechas, etc.) directamente en la consulta como un valor literal (ej. '12345678' o '{current_date}').**
             """
         
         # Llamar al LLM
