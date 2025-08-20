@@ -456,10 +456,10 @@ async def get_table_schema(table_name: str):
 @app.delete("/api/training-data/clear-all")
 async def clear_all_training_data(request: ClearRequest):
     """
-    Elimina TODOS los datos de entrenamiento (DDL, Documentación y SQL).
+    Elimina TODOS los datos de entrenamiento (DDL, Documentación y SQL) de TODOS los tópicos.
     Requiere una confirmación explícita para proceder.
     """
-    # 1. Medida de seguridad: Verificar el texto de confirmación
+    # 1. Medida de seguridad (sin cambios)
     required_confirmation_text = "BORRAR TODO"
     if request.confirmation != required_confirmation_text:
         raise HTTPException(
@@ -468,7 +468,7 @@ async def clear_all_training_data(request: ClearRequest):
         )
         
     try:
-        # 2. Obtener todos los IDs de los datos de entrenamiento existentes
+        # 2. Obtener todos los datos de entrenamiento
         logger.info("Iniciando borrado de todos los datos de entrenamiento...")
         training_data = vn.get_training_data()
         
@@ -476,15 +476,23 @@ async def clear_all_training_data(request: ClearRequest):
             logger.info("No hay datos de entrenamiento para borrar.")
             return {"success": True, "message": "No había datos de entrenamiento para borrar.", "deleted_count": 0}
 
-        ids_to_remove = training_data['id'].tolist()
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # Ahora obtenemos una lista de registros, donde cada uno es un diccionario con 'id' y 'topic'
+        records_to_remove = training_data.to_dict('records')
         
-        # 3. Borrar cada registro uno por uno
+        # 3. Borrar cada registro uno por uno, pasando el id Y el topic
         deleted_count = 0
-        for doc_id in ids_to_remove:
-            if vn.remove_training_data(id=doc_id):
-                deleted_count += 1
+        for record in records_to_remove:
+            doc_id = record.get('id')
+            topic = record.get('topic')
+            
+            # Verificamos que tengamos ambos datos antes de intentar borrar
+            if doc_id and topic:
+                if vn.remove_training_data(id=doc_id, topic=topic): # <-- Se pasa el topic
+                    deleted_count += 1
+        # --- FIN DE LA MODIFICACIÓN ---
         
-        summary = f"Borrado completado. Se eliminaron {deleted_count} registros."
+        summary = f"Borrado completado. Se eliminaron {deleted_count} registros de todos los tópicos."
         logger.info(summary)
         
         return {
