@@ -15,7 +15,10 @@ import numpy as np
 # Configuración
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
+
 logger = logging.getLogger(__name__)
+
 
 # Crear aplicación FastAPI
 app = FastAPI(
@@ -78,7 +81,7 @@ def clean_non_json_values(data):
     if isinstance(data, dict):
         return {k:clean_non_json_values(v) for k, v in data.items()}
     if isinstance(data, list):
-        return [vlean_non_json_values(i) for i in data]
+        return [clean_non_json_values(i) for i in data]
     if isinstance(data, float) and (np.isnan(data) or np.isinf(data)):
         return None
     return data
@@ -121,96 +124,92 @@ async def health():
 
 @app.post("/api/generate-sql")
 async def generate_sql(request: QuestionRequest):
-    """Genera SQL a partir de una pregunta en lenguaje natural."""
+    """Genera SQL a partir de una pregunta, determinando el tópico automáticamente."""
     try:
         question = request.question.strip()
-        
         if not question:
             raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía")
         
-        sql = vn.generate_sql(question)
+        # --- LÓGICA NUEVA ---
+        # 1. Clasificar la pregunta para obtener el tópico
+        topic = vn.get_topic_for_question(question)
+        
+        # 2. Generar el SQL usando el tópico encontrado
+        sql = vn.generate_sql(question, topic=topic)
+        
+        return { "success": True, "question": question, "sql": sql, "inferred_topic": topic }
+        
+    except Exception as e:
+        logger.error(f"Error generando SQL: {e}")
+        return { "success": False, "error": str(e) }
+
+@app.post("/api/ask")
+async def ask(request: QuestionRequest):
+    """Genera SQL y ejecuta la consulta, determinando el tópico automáticamente."""
+    sql = None
+    topic = None
+    try:
+        question = request.question.strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía")
+        
+        # 1. Clasificar la pregunta para obtener el tópico
+        topic = vn.get_topic_for_question(question)
+        
+        # 2. Generar y ejecutar
+        sql = vn.generate_sql(question, topic=topic)
+        df = vn.run_sql(sql)
+        
+        # Debemos procesar el DataFrame y crear la variable cleaned_results ANTES de usarla.
+        if df is not None and not df.empty:
+            results = df.to_dict('records')
+            cleaned_results = clean_non_json_values(results)
+            row_count = len(df)
+        else:
+            cleaned_results = []
+            row_count = 0
         
         return {
             "success": True,
             "question": question,
-            "sql": sql
+            "sql": sql,
+            "results": cleaned_results, # Ahora la variable siempre existe
+            "row_count": row_count,
+            "inferred_topic": topic
         }
-        
-    except Exception as e:
-        logger.error(f"Error generando SQL: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-
-@app.post("/api/ask")
-async def ask(request: QuestionRequest):
-    """Genera SQL y ejecuta la consulta, retornando los resultados."""
-    sql = None # Definir sql aquí para que esté disponible en el bloque except
-    try:
-        question = request.question.strip()
-        
-        if not question:
-            raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía")
-        
-        # Generar SQL
-        sql = vn.generate_sql(question)
-        
-        # Ejecutar SQL
-        df = vn.run_sql(sql)
-        
-        # Convertir DataFrame a JSON
-        if df is not None:
-            results = df.to_dict('records')
-            
-            # Limpia los resultados para que sean compatibles con JSON
-            cleaned_results = clean_non_json_values(results)
-            
-            return {
-                "success": True,
-                "question": question,
-                "sql": sql,
-                "results": cleaned_results, # Usar los resultados limpios
-                "row_count": len(df)
-            }
-        else:
-            return {
-                "success": False,
-                "question": question,
-                "sql": sql,
-                "error": "Error ejecutando la consulta"
-            }
             
     except Exception as e:
         logger.error(f"Error en ask: {e}")
         return {
             "success": False,
             "error": str(e),
-            "sql": sql
+            "sql": sql,
+            "inferred_topic": topic
         }
 
 @app.post("/api/train")
 async def train(request: TrainRequest):
     """Entrena el modelo con nuevos datos."""
     try:
+        if not request.topic:
+            raise HTTPException(status_code=400, detail="El 'topic es obligatorio.")
         # Validar que al menos un tipo de entrenamiento esté presente
         if request.question and request.sql:
-            doc_id = vn.train(question=request.question, sql=request.sql)
+            doc_id = vn.train(question=request.question, sql=request.sql, topic = request.topic)
             return {
                 "success": True,
                 "type": "sql",
                 "id": doc_id
             }
         elif request.ddl:
-            doc_id = vn.train(ddl=vn.get_table_ddl(request.ddl))
+            doc_id = vn.train(ddl=vn.get_table_ddl(request.ddl), topic= request.topic)
             return {
                 "success": True,
                 "type": "ddl",
                 "id": doc_id
             }
         elif request.documentation:
-            doc_id = vn.train(documentation=request.documentation)
+            doc_id = vn.train(documentation=request.documentation, topic= request.topic)
             return {
                 "success": True,
                 "type": "documentation",
@@ -355,11 +354,11 @@ async def backup_training_data():
         )
 
 
-@app.delete("/api/training-data/{id}")
-async def remove_training_data(id: str):
+@app.delete("/api/training-data/{topic}/{id}")
+async def remove_training_data(topic: str, id: str):
     """Elimina un elemento del training data."""
     try:
-        success = vn.remove_training_data(id)
+        success = vn.remove_training_data(id=id, topic= topic)
         
         if success:
             return {

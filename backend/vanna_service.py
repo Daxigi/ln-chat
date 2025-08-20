@@ -39,21 +39,7 @@ class VannaChromaDB:
         
         # Cliente ChromaDB
         self.chroma_client = chromadb.PersistentClient(path=chroma_path)
-        
-        # Colecciones separadas (arquitectura oficial de Vanna)
-        self.documentation_collection = self.chroma_client.get_or_create_collection(
-            name="documentation",
-            embedding_function=self.embedding_function
-        )
-        self.ddl_collection = self.chroma_client.get_or_create_collection(
-            name="ddl", 
-            embedding_function=self.embedding_function
-        )
-        self.sql_collection = self.chroma_client.get_or_create_collection(
-            name="sql",
-            embedding_function=self.embedding_function
-        )
-        
+                
         # Parámetros de búsqueda
         self.n_results_sql = config.get("n_results_sql", 10)
         self.n_results_ddl = config.get("n_results_ddl", 10)
@@ -69,6 +55,32 @@ class VannaChromaDB:
         
         logger.info(f"✅ Vanna inicializado con ChromaDB en: {chroma_path}")
     
+
+    def _get_collections(self, topic: str):
+        """
+        Obtiene o crea las 3 colecciones para un tópico específico.
+        El nombre de la colección ahora incluye el tópico.
+        """
+        # Limpiamos el topic para que sea un nombre de colección válido
+        safe_topic = re.sub(r'[^a-zA-Z0-9_-]', '', topic).lower()
+
+        doc_collection = self.chroma_client.get_or_create_collection(
+            name=f"documentation_{safe_topic}",
+            embedding_function=self.embedding_function, # <- CORREGIDO (singular)
+            metadata={"topic": topic}
+        )
+        ddl_collection = self.chroma_client.get_or_create_collection(
+            name=f"ddl_{safe_topic}", 
+            embedding_function=self.embedding_function, # <- CORREGIDO (singular)
+            metadata={"topic": topic}
+        )
+        sql_collection = self.chroma_client.get_or_create_collection(
+            name=f"sql_{safe_topic}",
+            embedding_function=self.embedding_function, # <- CORREGIDO (singular)
+            metadata={"topic": topic}
+        )
+        return doc_collection, ddl_collection, sql_collection
+
     # ===== MÉTODOS DE CONEXIÓN A BASE DE DATOS =====
     
     def connect_to_mysql(self, host: str = None, dbname: str = None, 
@@ -115,95 +127,128 @@ class VannaChromaDB:
             raise e
     # ===== MÉTODOS DE ENTRENAMIENTO =====
     
-    def train(self, question: str = None, sql: str = None, 
+    def train(self, topic: str, question: str = None, sql: str = None, 
               ddl: str = None, documentation: str = None) -> str:
         """
-        Método principal de entrenamiento. Acepta diferentes tipos de datos.
+        Método principal de entrenamiento. Acepta diferentes tipos de datos
+        y un TÓPICO OBLIGATORIO.
         Retorna el ID del documento agregado.
         """
+        if not topic:
+            raise ValueError("El 'topic' es obligatorio para el entrenamiento.")
+        
         if question and sql:
-            return self.add_question_sql(question, sql)
+            return self.add_question_sql(question, sql, topic)
         elif ddl:
-            return self.add_ddl(ddl)
+            return self.add_ddl(ddl, topic)
         elif documentation:
-            return self.add_documentation(documentation)
+            return self.add_documentation(documentation, topic)
         else:
             raise ValueError("Debe proporcionar: (question y sql), ddl, o documentation")
     
-    def add_question_sql(self, question: str, sql: str) -> str:
-        """Agrega un par pregunta-SQL al training data."""
+    def add_question_sql(self, question: str, sql: str, topic: str) -> str:
+        _, _, sql_collection = self._get_collections(topic)
         doc_id = f"sql-{uuid.uuid4()}"
         document = json.dumps({"question": question, "sql": sql})
         
-        self.sql_collection.add(
-            documents=[document],
-            ids=[doc_id],
-            metadatas=[{"question": question}]
-        )
-        logger.info(f"✅ Agregado Q&A SQL: {doc_id}")
+        sql_collection.add(documents=[document], ids=[doc_id], metadatas=[{"question": question}])
+        logger.info(f"✅ Agregado Q&A SQL (Topic: {topic}): {doc_id}")
         return doc_id
     
-    def add_ddl(self, ddl: str) -> str:
-        """Agrega DDL (estructura de tabla) al training data."""
+    def add_ddl(self, ddl: str, topic: str) -> str:
+        _, ddl_collection, _ = self._get_collections(topic)
         doc_id = f"ddl-{uuid.uuid4()}"
-        self.ddl_collection.add(
-            documents=[ddl],
-            ids=[doc_id]
-        )
-        logger.info(f"✅ Agregado DDL: {doc_id}")
+        ddl_collection.add(documents=[ddl], ids=[doc_id])
+        logger.info(f"✅ Agregado DDL (Topic: {topic}): {doc_id}")
         return doc_id
     
-    def add_documentation(self, documentation: str) -> str:
-        """Agrega documentación de negocio al training data."""
+    def add_documentation(self, documentation: str, topic: str) -> str:
+        doc_collection, _, _ = self._get_collections(topic)
         doc_id = f"doc-{uuid.uuid4()}"
-        self.documentation_collection.add(
-            documents=[documentation],
-            ids=[doc_id]
-        )
-        logger.info(f"✅ Agregada documentación: {doc_id}")
+        doc_collection.add(documents=[documentation], ids=[doc_id])
+        logger.info(f"✅ Agregada documentación (Topic: {topic}): {doc_id}")
         return doc_id
     
     # ===== MÉTODOS DE BÚSQUEDA/RECUPERACIÓN =====
     
-    def get_similar_question_sql(self, question: str) -> List[Dict]:
-        """Busca preguntas similares y sus SQLs."""
-        results = self.sql_collection.query(
-            query_texts=[question],
-            n_results=self.n_results_sql
+    def get_similar_question_sql(self, question: str, topic: str) -> List[Dict]:
+        _, _, sql_collection = self._get_collections(topic)
+        results = sql_collection.query(query_texts=[question], n_results=self.n_results_sql)
+        return [json.loads(doc) for doc in results['documents'][0]] if results['documents'][0] else []
+    
+    def get_related_ddl(self, question: str, topic: str) -> List[str]:
+        _, ddl_collection, _ = self._get_collections(topic)
+        results = ddl_collection.query(query_texts=[question], n_results=self.n_results_ddl)
+        return results['documents'][0] if results['documents'][0] else []
+    
+    def get_related_documentation(self, question: str, topic: str) -> List[str]:
+        doc_collection, _, _ = self._get_collections(topic)
+        results = doc_collection.query(query_texts=[question], n_results=self.n_results_documentation)
+        return results['documents'][0] if results['documents'][0] else []
+    def get_available_topics(self) -> list:
+        """Escanea las colecciones y devuelve una lista de tópicos disponibles."""
+        collections = self.chroma_client.list_collections()
+        # Usamos un set para evitar duplicados y extraemos el tópico del metadato
+        topics = {c.metadata.get("topic") for c in collections if c.metadata and "topic" in c.metadata}
+        return list(topics)
+
+    def get_topic_for_question(self, question: str) -> str:
+        """
+        Usa el LLM para clasificar la pregunta del usuario en uno de los tópicos disponibles.
+        Esta es nuestra 'recepcionista inteligente'.
+        """
+        available_topics = self.get_available_topics()
+        
+        if not available_topics:
+            # Si no hay tópicos entrenados, no se puede clasificar nada.
+            raise ValueError("No hay tópicos entrenados. Por favor, entrena el sistema primero.")
+        
+        # Si solo hay un tópico, lo devolvemos directamente para ahorrar una llamada al LLM.
+        if len(available_topics) == 1:
+            return available_topics[0]
+
+        system_prompt = f"""
+        Tu única tarea es clasificar la pregunta del usuario en una de las siguientes categorías (tópicos).
+        Las categorías disponibles son: {', '.join(available_topics)}.
+        Responde ÚNICAMENTE con el nombre exacto de la categoría, sin explicaciones ni texto adicional.
+        """
+
+        response = self.llm_client.chat.completions.create(
+            model="gpt-4o", # Podemos usar un modelo rápido para esta tarea
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            temperature=0,
+            max_tokens=10 # El nombre de un tópico no debería ser más largo
         )
         
-        if not results['documents'][0]:
-            return []
-            
-        return [json.loads(doc) for doc in results['documents'][0]]
-    
-    def get_related_ddl(self, question: str) -> List[str]:
-        """Busca DDLs relevantes para la pregunta."""
-        results = self.ddl_collection.query(
-            query_texts=[question],
-            n_results=self.n_results_ddl
-        )
-        return results['documents'][0] if results['documents'][0] else []
-    
-    def get_related_documentation(self, question: str) -> List[str]:
-        """Busca documentación relevante para la pregunta."""
-        results = self.documentation_collection.query(
-            query_texts=[question],
-            n_results=self.n_results_documentation
-        )
-        return results['documents'][0] if results['documents'][0] else []
-    
+        # La respuesta del LLM debería ser directamente el nombre del tópico.
+        topic = response.choices[0].message.content.strip()
+
+        # Verificación para asegurarnos de que el LLM devolvió un tópico válido
+        if topic in available_topics:
+            logger.info(f"🤖 Pregunta clasificada en el tópico: '{topic}'")
+            return topic
+        else:
+            # Si el LLM responde algo inesperado, usamos "general" como fallback seguro.
+            logger.warning(f"Clasificación de tópico fallida. Usando 'general' como fallback.")
+            return "general"
+
     # ===== MÉTODO PRINCIPAL: GENERACIÓN DE SQL =====
     
-    def generate_sql(self, question: str) -> str:
+    def generate_sql(self, question: str, topic: str) -> str:
         """
         Genera SQL a partir de una pregunta en lenguaje natural.
         Este es el método principal que los usuarios llamarán.
         """
+        if not topic:
+            raise ValueError("El 'topic' es obligatorio para generar SQL.")
+
         # Obtener contexto relevante
-        ddl_list = self.get_related_ddl(question)
-        doc_list = self.get_related_documentation(question)
-        sql_list = self.get_similar_question_sql(question)
+        ddl_list = self.get_related_ddl(question, topic = topic)
+        doc_list = self.get_related_documentation(question, topic = topic)
+        sql_list = self.get_similar_question_sql(question, topic = topic)
         
         # Construir prompt
         prompt = self._construct_prompt(question, ddl_list, doc_list, sql_list)
@@ -287,14 +332,14 @@ class VannaChromaDB:
     
     # ===== MÉTODO COMBINADO: ASK (pregunta -> SQL -> resultados) =====
     
-    def ask(self, question: str, print_results: bool = True) -> pd.DataFrame:
+    def ask(self, question: str, topic: str , print_results: bool = True) -> pd.DataFrame:
         """
         Método de alto nivel: genera SQL y ejecuta la consulta.
         Retorna el DataFrame con resultados.
         """
         try:
             # Generar SQL
-            sql = self.generate_sql(question)
+            sql = self.generate_sql(question, topic)
             if print_results:
                 print(f"Generated SQL:\n{sql}\n")
             
@@ -316,60 +361,51 @@ class VannaChromaDB:
     # ===== MÉTODOS DE GESTIÓN =====
     
     def get_training_data(self) -> pd.DataFrame:
-        """Obtiene todos los datos de entrenamiento como DataFrame."""
+        """Obtiene TODOS los datos de entrenamiento de TODOS los tópicos."""
+        all_collections = self.chroma_client.list_collections()
         data = []
         
-        # SQL training data
-        sql_data = self.sql_collection.get()
-        for i, doc_id in enumerate(sql_data['ids']):
-            doc = json.loads(sql_data['documents'][i])
-            data.append({
-                'id': doc_id,
-                'type': 'sql',
-                'question': doc.get('question'),
-                'content': doc.get('sql')
-            })
-        
-        # DDL training data
-        ddl_data = self.ddl_collection.get()
-        for i, doc_id in enumerate(ddl_data['ids']):
-            data.append({
-                'id': doc_id,
-                'type': 'ddl',
-                'question': None,
-                'content': ddl_data['documents'][i]
-            })
-        
-        # Documentation training data
-        doc_data = self.documentation_collection.get()
-        for i, doc_id in enumerate(doc_data['ids']):
-            data.append({
-                'id': doc_id,
-                'type': 'documentation',
-                'question': None,
-                'content': doc_data['documents'][i]
-            })
+        for coll in all_collections:
+            topic = coll.metadata.get("topic", "desconocido")
+            coll_data = coll.get()
+
+            if coll.name.startswith('sql_'):
+                for i, doc_id in enumerate(coll_data['ids']):
+                    doc = json.loads(coll_data['documents'][i])
+                    data.append({'id': doc_id, 'type': 'sql', 'topic': topic, 'question': doc.get('question'), 'content': doc.get('sql')})
+            
+            elif coll.name.startswith('ddl_'):
+                for i, doc_id in enumerate(coll_data['ids']):
+                    data.append({'id': doc_id, 'type': 'ddl', 'topic': topic, 'question': None, 'content': coll_data['documents'][i]})
+
+            elif coll.name.startswith('documentation_'):
+                 for i, doc_id in enumerate(coll_data['ids']):
+                    data.append({'id': doc_id, 'type': 'documentation', 'topic': topic, 'question': None, 'content': coll_data['documents'][i]})
         
         return pd.DataFrame(data)
     
-    def remove_training_data(self, id: str) -> bool:
-        """Elimina un elemento del training data por ID."""
+    def remove_training_data(self, id: str, topic: str) -> bool:
+        """Elimina un elemento del training data por ID y TÓPICO."""
         try:
+            if not topic:
+                raise ValueError("El 'topic' es obligatorio para eliminar datos.")
+
+            doc_collection, ddl_collection, sql_collection = self._get_collections(topic)
+            
             if id.startswith('sql-'):
-                self.sql_collection.delete(ids=[id])
+                sql_collection.delete(ids=[id])
             elif id.startswith('ddl-'):
-                self.ddl_collection.delete(ids=[id])
+                ddl_collection.delete(ids=[id])
             elif id.startswith('doc-'):
-                self.documentation_collection.delete(ids=[id])
+                doc_collection.delete(ids=[id])
             else:
-                logger.error(f"ID no válido: {id}")
                 return False
-                
-            logger.info(f"✅ Eliminado: {id}")
+            
+            logger.info(f"✅ Eliminado {id} del tópico {topic}")
             return True
             
         except Exception as e:
-            logger.error(f"Error eliminando {id}: {e}")
+            logger.error(f"Error eliminando {id} del tópico {topic}: {e}")
             return False
     
     # ===== MÉTODOS ÚTILES ADICIONALES =====
@@ -384,19 +420,19 @@ class VannaChromaDB:
         df = self.run_sql(f"SHOW CREATE TABLE `{table_name}`")
         return df.iloc[0, 1] if df is not None and not df.empty else ""
     
-    def train_on_ddl_from_database(self, tables: List[str] = None):
-        """Entrena automáticamente con DDLs de las tablas de la BD."""
+    def train_on_ddl_from_database(self, topic: str, tables: List[str] = None):
+        if not topic:
+            raise ValueError("El 'topic' es obligatorio.")
         if tables is None:
             tables = self.get_table_names()
-            
         for table in tables:
             try:
                 ddl = self.get_table_ddl(table)
                 if ddl:
-                    self.add_ddl(ddl)
-                    logger.info(f"✅ Entrenado con DDL de tabla: {table}")
+                    self.add_ddl(ddl, topic)
+                    logger.info(f"✅ Entrenado con DDL de tabla: {table} (Topic: {topic})")
             except Exception as e:
-                logger.error(f"Error con tabla {table}: {e}")
+                logger.error(f"Error con tabla {table} (Topic: {topic}): {e}")
 
 
 # ===== EJEMPLO DE USO =====
