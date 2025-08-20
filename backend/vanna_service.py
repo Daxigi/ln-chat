@@ -29,7 +29,12 @@ class VannaChromaDB:
             config = {}
             
         # Configuración del Vector Store (ChromaDB)
-        chroma_path = config.get("chroma_path", os.getenv("VANNA_VECTOR_DB_PATH", "./chroma_db"))
+        chroma_path = os.getenv("VANNA_VECTOR_DB_PATH")
+        if chroma_path is None:
+            # Si la variable no está definida, detiene la aplicación y avisa.
+            # Esto evita el error de guardado silencioso.
+            raise ValueError("¡ERROR CRÍTICO! La variable de entorno VANNA_VECTOR_DB_PATH no está definida. La aplicación no puede iniciarse.")
+
         
         # Embeddings de OpenAI
         self.embedding_function = embedding_functions.OpenAIEmbeddingFunction(

@@ -6,6 +6,9 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: vanna-backend-test # <-- CAMBIO: Nombre único
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - VANNA_VECTOR_DB_PATH=${VANNA_VECTOR_DB_PATH}
     env_file: .env
     ports:
       - "8001:8000" # <-- CAMBIO: Puerto único
