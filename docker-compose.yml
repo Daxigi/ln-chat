@@ -10,7 +10,7 @@ services:
     ports:
       - "8001:8000" # <-- CAMBIO: Puerto único
     volumes:
-      - chroma_data_test:/data/chroma # <-- CAMBIO: Volumen único
+      - ./chroma_data_vps:/data/chroma
       - ./vps_backups:/app/backend/backups
     networks:
       - vanna_net_test # <-- CAMBIO: Red única
@@ -32,8 +32,6 @@ services:
     restart: unless-stopped
 
 # Definir los nuevos nombres de volumen y red
-volumes:
-  chroma_data_test: {} # <-- CAMBIO
 
 networks:
   vanna_net_test: {} # <-- CAMBIO
