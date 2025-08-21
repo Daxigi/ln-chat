@@ -68,6 +68,10 @@ TRAINING_DATA_BY_TOPIC = {
                 "question": "¿Qué agentes están asignados a una solicitud?",
                 "sql": "SELECT a.id AS agent_id, a.name AS agent_name FROM agents a JOIN requests r ON r.agent_id = a.id WHERE r.id = :request_id;"
             }
+            {
+                "question": "¿Cuantos cambios de estado realizo un agente por DNI en julio?",
+                "sql": "SELECT \n  u.name AS agente,\n  u.dni,\n  p.name AS tramite,\n  rs.description AS estado,\n  COUNT(*) AS cantidad_cambios\nFROM request_state_records rsr\nJOIN users u ON u.id = rsr.user_id\nJOIN request_states rs ON rs.id = rsr.request_status_id\nJOIN requests r ON r.id = rsr.request_id\nJOIN procedures p ON p.id = r.procedure_id\nJOIN model_has_roles mhr ON mhr.model_id = u.id AND mhr.model_type = 'App\\\\Models\\\\User'\nJOIN roles ro ON ro.id = mhr.role_id\nWHERE ro.id = 4\n  AND u.dni = :dni\n  AND rsr.created_at >= :desde AND rsr.created_at < :hasta\n  AND rs.id IN (:estados)\n  AND r.deleted_at IS NULL\n  AND rsr.deleted_at IS NULL\nGROUP BY u.name, u.dni, p.name, rs.description;"
+            }
         ]
     },
     # --- TÓPICO: request_y_tramites ---
