@@ -59,6 +59,7 @@ class TrainRequest(BaseModel):
     question: Optional[str] = None
     sql: Optional[str] = None
     ddl: Optional[str] = None
+    topic: Optional[str] = None
     documentation: Optional[str] = None
 
 class SQLRequest(BaseModel):

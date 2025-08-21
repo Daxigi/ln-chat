@@ -34,9 +34,9 @@ TRAINING_DATA_BY_TOPIC = {
         "sql_examples": []
     },
     
-    # --- TÓPICO: usuarios_y_roles ---
+    # --- TÓPICO: users_and_roles ---
     # Todo lo relacionado con usuarios, permisos y roles.
-    "usuarios_y_roles": {
+    "users_and_roles": {
         "documentation": [
             "USERS: Contiene la información de todos los usuarios registrados en el sistema.",
             "USERS: Los usuarios con el campo 'deleted_at' en NULL son considerados usuarios activos.",
@@ -55,10 +55,24 @@ TRAINING_DATA_BY_TOPIC = {
             }
         ]
     },
-    
-    # --- TÓPICO: solicitudes_y_tramites ---
+    # -- TOPICO: agentes
+    "agents": {
+        "documentation": [
+            "AGENTS: Representa a los usuarios con rol 4 que pueden gestionar solicitudes.",
+            "AGENTS: Los agentes tienen permisos especiales para ver y modificar solicitudes.",
+            "REQUEST_FOR_AGENTS: Para contar atenciones/gestiones de un agente, contar filas de request_state_records (no requests).",
+            "REQUEST_FOR_AGENTS: Al contar atenciones/gestiones de un agente, no tener en cuenta los cambios a estado 1 (borrador) ni 2 (publicado)."
+        ],
+        "sql_examples": [
+            {
+                "question": "¿Qué agentes están asignados a una solicitud?",
+                "sql": "SELECT a.id AS agent_id, a.name AS agent_name FROM agents a JOIN requests r ON r.agent_id = a.id WHERE r.id = :request_id;"
+            }
+        ]
+    },
+    # --- TÓPICO: request_y_tramites ---
     # El corazón del negocio: solicitudes, trámites y sus estados.
-    "solicitudes_y_tramites": {
+    "requests_and_procedures": {
         "documentation": [
             "REQUESTS: Almacena todas las solicitudes de trámites iniciadas por los usuarios.",
             "REQUESTS: Las solicitudes con 'deleted_at' en NULL están vigentes (no eliminadas).",
@@ -74,7 +88,8 @@ TRAINING_DATA_BY_TOPIC = {
             "REQUEST_STATE_RECORDS: Para saber qué agente atendió un trámite, buscar el user_id en el último registro de esta tabla.",
             "TRÁMITES: Para contar solicitudes por trámite y estado, usar el último estado de cada request (ROW_NUMBER OVER PARTITION BY).",
             "CONSULTA SOLICITUD: Dado un DNI y nombre parcial del trámite, unir requests con users (por user_id) y procedures (por procedure_id).",
-            "CONSULTA SOLICITUD: Filtrar por u.dni='[DNI]' y p.name LIKE '%[TRÁMITE]%'.",
+            "CONSULTA SOLICITUD: Filtrar por u.dni='[DNI]'",
+            "CONSULTA SOLICITUD: Reemplaza `LIKE '%texto%'` por `IN (...)` para evitar problemas con nombres inexactos o ambigüedades.",
             "CONSULTA SOLICITUD: Excluir eliminadas con r.deleted_at IS NULL.",
             "CONSULTA SOLICITUD: Tomar solo la última solicitud del usuario para ese trámite (ORDER BY created_at DESC LIMIT 1).",
             "CONSULTA SOLICITUD: Obtener el estado actual usando el último cambio en request_state_records (por fecha DESC)."

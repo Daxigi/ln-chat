@@ -269,7 +269,7 @@ class VannaChromaDB:
             1. Si una pregunta implica una fecha pero no se especifica el año, asume que se refiere al año actual: {current_year}.
             2. Analiza el esquema de la base de datos y los ejemplos para usar los nombres correctos de tablas y columnas.
             3. Nunca busques o respondas contraseñas, claves(EXCEPTO DNI, CORREOS o IDS).
-            4. Siempre normalizar fechas relativas a absolutas usando TZ "America/Argentina/Cordoba"; usar rango semiabierto [start_date, end_next) o cerrado con '00:00:00' y '23:59:59'; evitar funciones MONTH/YEAR en columnas para no romper índices.
+            4. Siempre normalizar fechas relativas a absolutas usar rango semiabierto [start_date, end_next) o cerrado con '00:00:00' y '23:59:59'
             5. En TODA consulta que cuente solicitudes, excluir eliminadas lógicamente con r.deleted_at IS NULL
             """
         
