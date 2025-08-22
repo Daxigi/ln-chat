@@ -280,7 +280,7 @@ class VannaChromaDB:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.1,
+            temperature=0.0,
             max_tokens=800
         )
         
